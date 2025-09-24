@@ -1,0 +1,11 @@
+# ansible/playbooks/discover_device.yml
+---
+- name: Discover Cisco IOS Device Facts
+  hosts: all
+  gather_facts: false
+  connection: network_cli
+
+  tasks:
+    - name: Gather device facts
+      cisco.ios.ios_facts:
+        gather_subset: all

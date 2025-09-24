@@ -1,0 +1,28 @@
+# ansible/playbooks/configure_cisco_ios.yml (Template)
+---
+- name: Configure Cisco IOS Device
+  hosts: all
+  gather_facts: false
+  connection: network_cli
+
+  vars:
+    # 이 변수들은 GUI에서 편집될 값들입니다.
+    hostname: "Router-GUI"
+    interface_name: "GigabitEthernet0/1"
+    interface_desc: "Configured by Ansible GUI"
+    interface_ip: "192.168.1.1"
+    interface_mask: "255.255.255.0"
+
+  tasks:
+    - name: Set device hostname
+      cisco.ios.ios_config:
+        lines:
+          - "hostname {{ hostname }}"
+
+    - name: Configure interface
+      cisco.ios.ios_config:
+        parents: "interface {{ interface_name }}"
+        lines:
+          - "description {{ interface_desc }}"
+          - "ip address {{ interface_ip }} {{ interface_mask }}"
+          - "no shutdown"
