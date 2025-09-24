@@ -12,6 +12,7 @@ from PySide6.QtGui import QAction
 from core.playbook_manager import ConfigManager
 from core.ansible_engine import AnsibleEngine
 
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -20,7 +21,7 @@ class MainWindow(QMainWindow):
 
         self.config_manager = ConfigManager()
         self.ansible_engine = AnsibleEngine()
-        
+
         self._setup_ui()
         self._connect_signals()
 
@@ -32,9 +33,17 @@ class MainWindow(QMainWindow):
         # --- 왼쪽 패널: 장비 관리 및 OS 선택 ---
         device_management_group = QGroupBox("1. 장비 관리")
         device_layout = QVBoxLayout()
-        
+
         self.combo_os_type = QComboBox()
-        self.combo_os_type.addItems()
+        # [수정된 부분] OS 유형 리스트 추가
+        os_types = [
+            "L2_IOS-XE",
+            "L3_IOS-XE",
+            "L2_NX-OS",
+            "L3_NX-OS",
+            "WLC_AireOS"
+        ]
+        self.combo_os_type.addItems(os_types)
         device_layout.addWidget(QLabel("대상 장비 OS 유형:"))
         device_layout.addWidget(self.combo_os_type)
 
@@ -61,7 +70,7 @@ class MainWindow(QMainWindow):
         self.main_tabs.addTab(self._create_routing_tab(), "Routing")
         self.main_tabs.addTab(self._create_ha_tab(), "HA (고가용성)")
         self.main_tabs.addTab(self._create_security_tab(), "Security (ACL, SNMP 등)")
-        
+
         config_layout.addWidget(self.main_tabs)
         config_group.setLayout(config_layout)
 
@@ -98,7 +107,7 @@ class MainWindow(QMainWindow):
         group_hostname = QGroupBox("Hostname & General Service")
         form_hostname = QFormLayout()
         self.le_hostname = QLineEdit()
-        self.le_hostname.setPlaceholderText("")
+        self.le_hostname.setPlaceholderText("예: SW-CORE-01")
         self.cb_service_timestamps = QCheckBox()
         self.cb_service_password_encryption = QCheckBox()
         form_hostname.addRow("Hostname:", self.le_hostname)
@@ -111,7 +120,8 @@ class MainWindow(QMainWindow):
         group_logging = QGroupBox("Logging")
         form_logging = QFormLayout()
         self.logging_table = QTableWidget(0, 2)
-        self.logging_table.setHorizontalHeaderLabels()
+        # [수정된 부분] 헤더 라벨 추가
+        self.logging_table.setHorizontalHeaderLabels(["로깅 서버 IP", "VRF (선택사항)"])
         self.logging_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.btn_add_log_host = QPushButton("로깅 서버 추가")
         self.btn_remove_log_host = QPushButton("로깅 서버 삭제")
@@ -124,7 +134,8 @@ class MainWindow(QMainWindow):
         group_ntp = QGroupBox("NTP")
         form_ntp = QFormLayout()
         self.ntp_table = QTableWidget(0, 3)
-        self.ntp_table.setHorizontalHeaderLabels()
+        # [수정된 부분] 헤더 라벨 추가
+        self.ntp_table.setHorizontalHeaderLabels(["NTP 서버 IP", "Prefer (선택)", "VRF (선택사항)"])
         self.ntp_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.btn_add_ntp = QPushButton("NTP 서버 추가")
         self.btn_remove_ntp = QPushButton("NTP 서버 삭제")
@@ -132,19 +143,57 @@ class MainWindow(QMainWindow):
         form_ntp.addRow(self.ntp_table)
         group_ntp.setLayout(form_ntp)
         layout.addWidget(group_ntp)
-        
+
         layout.addStretch()
         return tab
 
     def _create_interface_tab(self):
         tab, layout = self._create_scrollable_tab()
-        # 이 섹션은 복잡하므로 추후 상세 구현
+
+        # 기본적인 인터페이스 설정 UI 추가
+        group_interface = QGroupBox("Physical Interface Configuration")
+        form_interface = QFormLayout()
+
+        # 인터페이스 타입 선택
+        self.combo_interface_type = QComboBox()
+        self.combo_interface_type.addItems(["Access", "Trunk", "Routed"])
+        form_interface.addRow("Interface Mode:", self.combo_interface_type)
+
+        # 기본 설정
+        self.le_interface_description = QLineEdit()
+        self.le_interface_description.setPlaceholderText("예: To Server Farm")
+        form_interface.addRow("Description:", self.le_interface_description)
+
+        group_interface.setLayout(form_interface)
+        layout.addWidget(group_interface)
+
+        # 추후 상세 구현 예정 메시지
         layout.addWidget(QLabel("인터페이스 설정 (Trunk, Access, Port-Channel) 기능이 여기에 구현됩니다."))
         layout.addStretch()
         return tab
 
     def _create_vlan_tab(self):
         tab, layout = self._create_scrollable_tab()
+
+        # VLAN 관리 테이블
+        group_vlan = QGroupBox("VLAN Management")
+        vlan_layout = QVBoxLayout()
+
+        self.vlan_table = QTableWidget(0, 3)
+        self.vlan_table.setHorizontalHeaderLabels(["VLAN ID", "VLAN Name", "Description"])
+        self.vlan_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+
+        vlan_button_layout = QHBoxLayout()
+        self.btn_add_vlan = QPushButton("VLAN 추가")
+        self.btn_remove_vlan = QPushButton("VLAN 삭제")
+        vlan_button_layout.addWidget(self.btn_add_vlan)
+        vlan_button_layout.addWidget(self.btn_remove_vlan)
+
+        vlan_layout.addLayout(vlan_button_layout)
+        vlan_layout.addWidget(self.vlan_table)
+        group_vlan.setLayout(vlan_layout)
+        layout.addWidget(group_vlan)
+
         layout.addWidget(QLabel("VLAN 정의 및 SVI 설정 기능이 여기에 구현됩니다."))
         layout.addStretch()
         return tab
@@ -163,7 +212,7 @@ class MainWindow(QMainWindow):
 
     def _create_security_tab(self):
         tab, layout = self._create_scrollable_tab()
-        
+
         # AAA
         group_aaa = QGroupBox("AAA")
         form_aaa = QFormLayout()
@@ -181,11 +230,11 @@ class MainWindow(QMainWindow):
 
         # ACL
         group_acl = QGroupBox("Access Control Lists (ACL)")
-        layout.addWidget(group_acl) # 추후 상세 구현
+        layout.addWidget(group_acl)  # 추후 상세 구현
 
         # SNMP
         group_snmp = QGroupBox("SNMP")
-        layout.addWidget(group_snmp) # 추후 상세 구현
+        layout.addWidget(group_snmp)  # 추후 상세 구현
 
         layout.addStretch()
         return tab
@@ -194,14 +243,19 @@ class MainWindow(QMainWindow):
         self.btn_add_device.clicked.connect(self.ui_add_device)
         self.btn_remove_device.clicked.connect(self.ui_remove_device)
         self.btn_apply.clicked.connect(self.run_config_task)
-        
-        # 동적으로 생성된 버튼에 대한 연결 (예시)
+
+        # 동적으로 생성된 버튼에 대한 연결
         self.btn_add_log_host.clicked.connect(lambda: self.ui_add_table_row(self.logging_table))
         self.btn_remove_log_host.clicked.connect(lambda: self.ui_remove_table_row(self.logging_table))
         self.btn_add_ntp.clicked.connect(lambda: self.ui_add_table_row(self.ntp_table))
         self.btn_remove_ntp.clicked.connect(lambda: self.ui_remove_table_row(self.ntp_table))
         self.btn_add_aaa_group.clicked.connect(lambda: self.ui_add_table_row(self.aaa_server_table))
         self.btn_remove_aaa_group.clicked.connect(lambda: self.ui_remove_table_row(self.aaa_server_table))
+
+        # VLAN 관리 버튼 연결
+        if hasattr(self, 'btn_add_vlan'):
+            self.btn_add_vlan.clicked.connect(lambda: self.ui_add_table_row(self.vlan_table))
+            self.btn_remove_vlan.clicked.connect(lambda: self.ui_remove_table_row(self.vlan_table))
 
     def _gather_data_from_ui(self):
         """하드코딩된 UI에서 모든 사용자 입력값을 수집합니다."""
@@ -211,8 +265,9 @@ class MainWindow(QMainWindow):
         data['global']['hostname'] = self.le_hostname.text()
         data['global']['service_timestamps'] = self.cb_service_timestamps.isChecked()
         data['global']['service_password_encryption'] = self.cb_service_password_encryption.isChecked()
-        
-        log_hosts =''
+
+        # [수정된 부분] 빈 리스트로 초기화
+        log_hosts = []
         for row in range(self.logging_table.rowCount()):
             ip_item = self.logging_table.item(row, 0)
             vrf_item = self.logging_table.item(row, 1)
@@ -220,18 +275,53 @@ class MainWindow(QMainWindow):
                 log_hosts.append({'ip': ip_item.text(), 'vrf': vrf_item.text() if vrf_item else ''})
         data['global']['logging_hosts'] = log_hosts
 
-        ntp_servers = ''
+        # [수정된 부분] 빈 리스트로 초기화
+        ntp_servers = []
         for row in range(self.ntp_table.rowCount()):
             ip_item = self.ntp_table.item(row, 0)
-            prefer_item = self.ntp_table.item(row, 1) # QCheckBox를 테이블 셀에 넣어야 함
+            prefer_item = self.ntp_table.item(row, 1)  # QCheckBox를 테이블 셀에 넣어야 함
             vrf_item = self.ntp_table.item(row, 2)
             if ip_item and ip_item.text():
                 ntp_servers.append({'ip': ip_item.text(), 'prefer': False, 'vrf': vrf_item.text() if vrf_item else ''})
         data['global']['ntp_servers'] = ntp_servers
 
+        # Interface Tab (기본 정보만)
+        data['interfaces']['type'] = self.combo_interface_type.currentText() if hasattr(self,
+                                                                                        'combo_interface_type') else 'Access'
+        data['interfaces']['description'] = self.le_interface_description.text() if hasattr(self,
+                                                                                            'le_interface_description') else ''
+
+        # VLAN Tab
+        vlans = []
+        if hasattr(self, 'vlan_table'):
+            for row in range(self.vlan_table.rowCount()):
+                vlan_id_item = self.vlan_table.item(row, 0)
+                vlan_name_item = self.vlan_table.item(row, 1)
+                vlan_desc_item = self.vlan_table.item(row, 2)
+                if vlan_id_item and vlan_id_item.text():
+                    vlans.append({
+                        'id': vlan_id_item.text(),
+                        'name': vlan_name_item.text() if vlan_name_item else '',
+                        'description': vlan_desc_item.text() if vlan_desc_item else ''
+                    })
+        data['vlans']['list'] = vlans
+
         # Security Tab
         data['security']['aaa_new_model'] = self.cb_aaa_new_model.isChecked()
-        #... 다른 탭과 위젯에서도 동일한 방식으로 데이터 수집...
+
+        # AAA 서버 그룹
+        aaa_groups = []
+        for row in range(self.aaa_server_table.rowCount()):
+            type_item = self.aaa_server_table.item(row, 0)
+            group_item = self.aaa_server_table.item(row, 1)
+            servers_item = self.aaa_server_table.item(row, 2)
+            if type_item and group_item and servers_item:
+                aaa_groups.append({
+                    'type': type_item.text(),
+                    'group_name': group_item.text(),
+                    'servers': [s.strip() for s in servers_item.text().split(',') if s.strip()]
+                })
+        data['security']['aaa_groups'] = aaa_groups
 
         return data
 
@@ -242,24 +332,28 @@ class MainWindow(QMainWindow):
         user_input_data = self._gather_data_from_ui()
         os_type = self.combo_os_type.currentText()
 
-        playbook_data = self.config_manager.generate_playbook(os_type, user_input_data)
-        
-        self.log_output.appendPlainText(f"===== {', '.join(target_hosts)}에 구성 적용 시작 ({os_type}) =====")
-        status, result_stdout = self.ansible_engine.execute_configuration(target_hosts, playbook_data)
+        try:
+            playbook_data = self.config_manager.generate_playbook(os_type, user_input_data)
 
-        if status == 'successful':
-            self.log_output.appendPlainText("구성 적용 성공.")
-        else:
-            self.log_output.appendPlainText("구성 적용 실패.")
-        
-        self.log_output.appendPlainText("--- Ansible 실행 결과 (모의) ---")
-        self.log_output.appendPlainText(result_stdout)
-        self.log_output.appendPlainText("--------------------------\n")
+            self.log_output.appendPlainText(f"===== {', '.join(target_hosts)}에 구성 적용 시작 ({os_type}) =====")
+            status, result_stdout = self.ansible_engine.execute_configuration(target_hosts, playbook_data)
+
+            if status == 'successful':
+                self.log_output.appendPlainText("구성 적용 성공.")
+            else:
+                self.log_output.appendPlainText("구성 적용 실패.")
+
+            self.log_output.appendPlainText("--- Ansible 실행 결과 (모의) ---")
+            self.log_output.appendPlainText(result_stdout)
+            self.log_output.appendPlainText("--------------------------\n")
+        except Exception as e:
+            self.log_output.appendPlainText(f"오류 발생: {str(e)}")
 
     # --- UI 헬퍼 함수들 ---
     def ui_add_device(self):
         text, ok = QInputDialog.getText(self, '장비 추가', '장비 IP 또는 호스트명 입력:')
-        if ok and text: self.device_list.addItem(text)
+        if ok and text:
+            self.device_list.addItem(text)
 
     def ui_remove_device(self):
         for item in self.device_list.selectedItems():
@@ -270,7 +364,8 @@ class MainWindow(QMainWindow):
 
     def ui_remove_table_row(self, table_widget):
         current_row = table_widget.currentRow()
-        if current_row > -1: table_widget.removeRow(current_row)
+        if current_row > -1:
+            table_widget.removeRow(current_row)
 
     def _get_selected_devices(self):
         selected_items = self.device_list.selectedItems()

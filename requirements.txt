@@ -1,3 +1,20 @@
-PySide6
-pyyaml
-ansible-runner
+# Standard Network Config Manager - Python Dependencies
+
+# GUI Framework
+PySide6>=6.5.0
+
+# YAML Processing
+PyYAML>=6.0
+
+# Future Ansible Integration (commented out for now - Windows compatibility)
+# ansible-runner>=2.3.0
+# ansible>=6.0.0
+
+# Development and Testing
+# pytest>=7.0.0
+# pytest-qt>=4.0.0
+
+# Optional: For future real Ansible execution
+# paramiko>=2.11.0  # SSH connectivity
+# netmiko>=4.1.0    # Network device connections
+# textfsm>=1.1.0    # Parsing network device output
