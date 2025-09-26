@@ -121,7 +121,6 @@ class MainWindow(QMainWindow):
         self._setup_menu()
         self._connect_signals()
         self._update_ui_for_os()
-        self.current_config_path = None  # ! 현재 파일 경로 변수 추가
 
     def _setup_ui(self):
         central_widget = QWidget()
@@ -205,202 +204,214 @@ class MainWindow(QMainWindow):
 
     def _create_global_tab(self):
         tab, layout = self._create_scrollable_tab()
-        # ... UI 위젯 생성 ... (이하 생략된 위젯 생성 코드는 이전과 동일)
-        group_hostname = QGroupBox("Hostname & General Service");
-        form_hostname = QFormLayout();
-        self.le_hostname = QLineEdit();
-        self.cb_service_timestamps = QCheckBox();
-        self.cb_service_password_encryption = QCheckBox();
-        self.cb_service_call_home = QCheckBox();
-        form_hostname.addRow("Hostname:", self.le_hostname);
-        form_hostname.addRow("service timestamps debug/log", self.cb_service_timestamps);
-        form_hostname.addRow("service password-encryption", self.cb_service_password_encryption);
-        form_hostname.addRow("no service call-home", self.cb_service_call_home);
-        group_hostname.setLayout(form_hostname);
+
+        group_hostname = QGroupBox("Hostname & General Service")
+        form_hostname = QFormLayout()
+        self.le_hostname = QLineEdit()
+        self.cb_service_timestamps = QCheckBox("service timestamps debug/log")
+        self.cb_service_password_encryption = QCheckBox("service password-encryption")
+        self.cb_service_call_home = QCheckBox("no service call-home")
+        form_hostname.addRow("Hostname:", self.le_hostname)
+        form_hostname.addRow(self.cb_service_timestamps)
+        form_hostname.addRow(self.cb_service_password_encryption)
+        form_hostname.addRow(self.cb_service_call_home)
+        group_hostname.setLayout(form_hostname)
         layout.addWidget(group_hostname)
-        group_dns = QGroupBox("DNS & Domain");
-        form_dns = QFormLayout();
-        self.le_domain_name = QLineEdit();
-        self.dns_table = QTableWidget(0, 2);
-        self.dns_table.setHorizontalHeaderLabels(["DNS 서버 IP", "VRF (선택사항)"]);
-        self.dns_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch);
-        self.btn_add_dns = QPushButton("DNS 서버 추가");
-        self.btn_remove_dns = QPushButton("DNS 서버 삭제");
-        form_dns.addRow("Domain Name:", self.le_domain_name);
-        form_dns.addRow(self.btn_add_dns, self.btn_remove_dns);
-        form_dns.addRow("DNS Servers:", self.dns_table);
-        group_dns.setLayout(form_dns);
+
+        group_dns = QGroupBox("DNS & Domain")
+        form_dns = QFormLayout()
+        self.le_domain_name = QLineEdit()
+        self.dns_table = QTableWidget(0, 2)
+        self.dns_table.setHorizontalHeaderLabels(["DNS 서버 IP", "VRF (선택사항)"])
+        self.dns_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.btn_add_dns = QPushButton("DNS 서버 추가")
+        self.btn_remove_dns = QPushButton("DNS 서버 삭제")
+        form_dns.addRow("Domain Name:", self.le_domain_name)
+        form_dns.addRow(self.btn_add_dns, self.btn_remove_dns)
+        form_dns.addRow(self.dns_table)
+        group_dns.setLayout(form_dns)
         layout.addWidget(group_dns)
-        group_clock = QGroupBox("Clock & Timezone");
-        form_clock = QFormLayout();
-        self.combo_timezone = QComboBox();
+
+        group_clock = QGroupBox("Clock & Timezone")
+        form_clock = QFormLayout()
+        self.combo_timezone = QComboBox()
         self.combo_timezone.addItems(
-            ["UTC 0", "KST 9", "JST 9", "CST 8", "EST -5", "PST -8", "GMT 0", "CET 1", "Custom"]);
-        self.le_custom_timezone = QLineEdit();
-        self.le_custom_timezone.setEnabled(False);
-        form_clock.addRow("Timezone:", self.combo_timezone);
-        form_clock.addRow("Custom Timezone:", self.le_custom_timezone);
-        self.cb_summer_time = QCheckBox("Summer-time (Daylight Saving) 적용");
-        self.le_summer_time_zone = QLineEdit();
-        self.le_summer_time_zone.setEnabled(False);
-        self.cb_summer_time.toggled.connect(self.le_summer_time_zone.setEnabled);
-        form_clock.addRow(self.cb_summer_time, self.le_summer_time_zone);
-        group_clock.setLayout(form_clock);
+            ["UTC 0", "KST 9", "JST 9", "CST 8", "EST -5", "PST -8", "GMT 0", "CET 1", "Custom"])
+        self.le_custom_timezone = QLineEdit()
+        self.le_custom_timezone.setEnabled(False)
+        form_clock.addRow("Timezone:", self.combo_timezone)
+        form_clock.addRow("Custom Timezone:", self.le_custom_timezone)
+        self.cb_summer_time = QCheckBox("Summer-time (Daylight Saving) 적용")
+        self.le_summer_time_zone = QLineEdit()
+        self.le_summer_time_zone.setEnabled(False)
+        form_clock.addRow(self.cb_summer_time, self.le_summer_time_zone)
+        group_clock.setLayout(form_clock)
         layout.addWidget(group_clock)
-        group_logging = QGroupBox("Logging");
-        form_logging = QFormLayout();
-        self.combo_logging_level = QComboBox();
+
+        group_logging = QGroupBox("Logging")
+        form_logging = QFormLayout()
+        self.combo_logging_level = QComboBox()
         self.combo_logging_level.addItems(
-            ["informational (6)", "warnings (4)", "errors (3)", "critical (2)", "debugging (7)"]);
-        self.cb_logging_console = QCheckBox();
-        self.cb_logging_console.setChecked(True);
-        self.cb_logging_buffered = QCheckBox();
-        self.cb_logging_buffered.setChecked(True);
-        self.le_logging_buffer_size = QLineEdit("32000");
-        self.logging_table = QTableWidget(0, 2);
-        self.logging_table.setHorizontalHeaderLabels(["로깅 서버 IP", "VRF (선택사항)"]);
-        self.logging_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch);
-        self.btn_add_log_host = QPushButton("로깅 서버 추가");
-        self.btn_remove_log_host = QPushButton("로깅 서버 삭제");
-        form_logging.addRow("Logging Level:", self.combo_logging_level);
-        form_logging.addRow("Console Logging:", self.cb_logging_console);
-        form_logging.addRow("Buffered Logging:", self.cb_logging_buffered);
-        form_logging.addRow("Buffer Size:", self.le_logging_buffer_size);
-        form_logging.addRow(self.btn_add_log_host, self.btn_remove_log_host);
-        form_logging.addRow("Remote Logging Hosts:", self.logging_table);
-        group_logging.setLayout(form_logging);
+            ["informational (6)", "warnings (4)", "errors (3)", "critical (2)", "debugging (7)"])
+        self.cb_logging_console = QCheckBox("Console Logging")
+        self.cb_logging_console.setChecked(True)
+        self.cb_logging_buffered = QCheckBox("Buffered Logging")
+        self.cb_logging_buffered.setChecked(True)
+        self.le_logging_buffer_size = QLineEdit("32000")
+        self.logging_table = QTableWidget(0, 2)
+        self.logging_table.setHorizontalHeaderLabels(["로깅 서버 IP", "VRF (선택사항)"])
+        self.logging_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.btn_add_log_host = QPushButton("로깅 서버 추가")
+        self.btn_remove_log_host = QPushButton("로깅 서버 삭제")
+        form_logging.addRow("Logging Level:", self.combo_logging_level)
+        form_logging.addRow(self.cb_logging_console)
+        form_logging.addRow(self.cb_logging_buffered)
+        form_logging.addRow("Buffer Size:", self.le_logging_buffer_size)
+        form_logging.addRow(self.btn_add_log_host, self.btn_remove_log_host)
+        form_logging.addRow(self.logging_table)
+        group_logging.setLayout(form_logging)
         layout.addWidget(group_logging)
-        group_ntp = QGroupBox("NTP");
-        form_ntp = QFormLayout();
-        self.cb_ntp_authenticate = QCheckBox();
-        self.le_ntp_master_stratum = QLineEdit();
-        self.ntp_table = QTableWidget(0, 4);
-        self.ntp_table.setHorizontalHeaderLabels(["NTP 서버 IP", "Prefer", "Key ID", "VRF"]);
-        self.ntp_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch);
-        self.btn_add_ntp = QPushButton("NTP 서버 추가");
-        self.btn_remove_ntp = QPushButton("NTP 서버 삭제");
-        form_ntp.addRow("NTP Authentication:", self.cb_ntp_authenticate);
-        form_ntp.addRow("Master Stratum:", self.le_ntp_master_stratum);
-        form_ntp.addRow(self.btn_add_ntp, self.btn_remove_ntp);
-        form_ntp.addRow("NTP Servers:", self.ntp_table);
-        group_ntp.setLayout(form_ntp);
+
+        group_ntp = QGroupBox("NTP")
+        form_ntp = QFormLayout()
+        self.cb_ntp_authenticate = QCheckBox("NTP Authentication")
+        self.le_ntp_master_stratum = QLineEdit()
+        self.ntp_table = QTableWidget(0, 4)
+        self.ntp_table.setHorizontalHeaderLabels(["NTP 서버 IP", "Prefer", "Key ID", "VRF"])
+        self.ntp_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.btn_add_ntp = QPushButton("NTP 서버 추가")
+        self.btn_remove_ntp = QPushButton("NTP 서버 삭제")
+        form_ntp.addRow(self.cb_ntp_authenticate)
+        form_ntp.addRow("Master Stratum:", self.le_ntp_master_stratum)
+        form_ntp.addRow(self.btn_add_ntp, self.btn_remove_ntp)
+        form_ntp.addRow(self.ntp_table)
+        group_ntp.setLayout(form_ntp)
         layout.addWidget(group_ntp)
-        group_mgmt = QGroupBox("Management Interface");
-        form_mgmt = QFormLayout();
-        self.combo_mgmt_interface = QComboBox();
+
+        group_mgmt = QGroupBox("Management Interface")
+        form_mgmt = QFormLayout()
+        self.combo_mgmt_interface = QComboBox()
         self.combo_mgmt_interface.addItems(
-            ["None", "GigabitEthernet0/0", "Management1", "Management0", "Vlan1", "FastEthernet0", "Custom"]);
-        self.le_custom_mgmt_interface = QLineEdit();
-        self.le_custom_mgmt_interface.setEnabled(False);
-        self.le_mgmt_ip = QLineEdit();
-        self.le_mgmt_subnet = QLineEdit();
-        self.le_mgmt_gateway = QLineEdit();
-        self.le_mgmt_vrf = QLineEdit();
-        form_mgmt.addRow("Management Interface:", self.combo_mgmt_interface);
-        form_mgmt.addRow("Custom Interface:", self.le_custom_mgmt_interface);
-        form_mgmt.addRow("IP Address:", self.le_mgmt_ip);
-        form_mgmt.addRow("Subnet Mask:", self.le_mgmt_subnet);
-        form_mgmt.addRow("Gateway:", self.le_mgmt_gateway);
-        form_mgmt.addRow("VRF:", self.le_mgmt_vrf);
-        group_mgmt.setLayout(form_mgmt);
+            ["None", "GigabitEthernet0/0", "Management1", "Management0", "Vlan1", "FastEthernet0", "Custom"])
+        self.le_custom_mgmt_interface = QLineEdit()
+        self.le_custom_mgmt_interface.setEnabled(False)
+        self.le_mgmt_ip = QLineEdit()
+        self.le_mgmt_subnet = QLineEdit()
+        self.le_mgmt_gateway = QLineEdit()
+        self.le_mgmt_vrf = QLineEdit()
+        form_mgmt.addRow("Management Interface:", self.combo_mgmt_interface)
+        form_mgmt.addRow("Custom Interface:", self.le_custom_mgmt_interface)
+        form_mgmt.addRow("IP Address:", self.le_mgmt_ip)
+        form_mgmt.addRow("Subnet Mask:", self.le_mgmt_subnet)
+        form_mgmt.addRow("Gateway:", self.le_mgmt_gateway)
+        form_mgmt.addRow("VRF:", self.le_mgmt_vrf)
+        group_mgmt.setLayout(form_mgmt)
         layout.addWidget(group_mgmt)
-        group_banner = QGroupBox("Login Banner");
-        banner_layout = QVBoxLayout();
-        self.cb_enable_banner = QCheckBox("Enable Login Banner");
-        self.te_banner_text = QPlainTextEdit();
-        self.te_banner_text.setMaximumHeight(100);
-        self.te_banner_text.setEnabled(False);
-        banner_layout.addWidget(self.cb_enable_banner);
-        banner_layout.addWidget(QLabel("Banner Text:"));
-        banner_layout.addWidget(self.te_banner_text);
-        group_banner.setLayout(banner_layout);
+
+        group_banner = QGroupBox("Login Banner")
+        form_banner = QFormLayout()
+        self.cb_enable_banner = QCheckBox("Enable Login Banner")
+        self.te_banner_text = QPlainTextEdit()
+        self.te_banner_text.setMaximumHeight(100)
+        self.te_banner_text.setEnabled(False)
+        form_banner.addRow(self.cb_enable_banner)
+        form_banner.addRow("Banner Text:", self.te_banner_text)
+        group_banner.setLayout(form_banner)
         layout.addWidget(group_banner)
-        self.group_archive = QGroupBox("Configuration Archive");
-        form_archive = QFormLayout();
-        self.cb_archive_config = QCheckBox("Enable Configuration Archive");
-        self.le_archive_path = QLineEdit();
-        self.le_archive_path.setEnabled(False);
-        self.le_archive_max_files = QLineEdit();
-        self.le_archive_max_files.setEnabled(False);
-        self.cb_archive_time_period = QCheckBox("Time-based Archive");
-        self.le_archive_time_period = QLineEdit();
-        self.le_archive_time_period.setEnabled(False);
-        form_archive.addRow(self.cb_archive_config);
-        form_archive.addRow("Archive Path:", self.le_archive_path);
-        form_archive.addRow("Max Files:", self.le_archive_max_files);
-        form_archive.addRow(self.cb_archive_time_period, self.le_archive_time_period);
-        self.group_archive.setLayout(form_archive);
+
+        self.group_archive = QGroupBox("Configuration Archive")
+        form_archive = QFormLayout()
+        self.cb_archive_config = QCheckBox("Enable Configuration Archive")
+        self.le_archive_path = QLineEdit()
+        self.le_archive_path.setEnabled(False)
+        self.le_archive_max_files = QLineEdit()
+        self.le_archive_max_files.setEnabled(False)
+        self.cb_archive_time_period = QCheckBox("Time-based Archive")
+        self.le_archive_time_period = QLineEdit()
+        self.le_archive_time_period.setEnabled(False)
+        form_archive.addRow(self.cb_archive_config)
+        form_archive.addRow("Archive Path:", self.le_archive_path)
+        form_archive.addRow("Max Files:", self.le_archive_max_files)
+        form_archive.addRow(self.cb_archive_time_period, self.le_archive_time_period)
+        self.group_archive.setLayout(form_archive)
         layout.addWidget(self.group_archive)
+
         layout.addStretch()
         return tab
 
     def _create_interface_tab(self):
-        tab = QWidget();
-        main_layout = QHBoxLayout(tab);
-        left_widget = QWidget();
-        left_layout = QVBoxLayout(left_widget);
-        left_layout.addWidget(QLabel("설정할 인터페이스 목록 (Ctrl, Shift로 다중 선택 가능)"));
-        self.interface_list = QListWidget();
-        self.interface_list.setSelectionMode(QAbstractItemView.ExtendedSelection);
-        left_layout.addWidget(self.interface_list);
-        warning_label = QLabel("주의: 물리적 구성이 동일한\n장비 그룹별로 작업하십시오.");
-        warning_label.setStyleSheet("color: red; font-weight: bold;");
-        left_layout.addWidget(warning_label);
-        btn_layout = QHBoxLayout();
-        self.btn_add_interface = QPushButton("인터페이스 추가");
-        self.btn_add_port_channel = QPushButton("Port-Channel 추가");
-        self.btn_remove_interface = QPushButton("목록에서 삭제");
-        btn_layout.addWidget(self.btn_add_interface);
-        btn_layout.addWidget(self.btn_add_port_channel);
-        left_layout.addLayout(btn_layout);
-        left_layout.addWidget(self.btn_remove_interface);
-        main_layout.addWidget(left_widget, 2);
-        scroll_area = QScrollArea();
-        scroll_area.setWidgetResizable(True);
-        right_widget = QWidget();
-        self.right_layout = QVBoxLayout(right_widget);
-        scroll_area.setWidget(right_widget);
-        main_layout.addWidget(scroll_area, 5);
-        self.config_area_widget = QWidget();
-        config_layout = QVBoxLayout(self.config_area_widget);
-        self.right_layout.addWidget(self.config_area_widget);
-        group_basic = QGroupBox("기본 설정");
-        form_basic = QFormLayout();
-        self.if_label = QLabel("왼쪽 목록에서 인터페이스를 선택하세요.");
-        self.cb_if_shutdown = QCheckBox("Shutdown");
-        self.le_if_description = QLineEdit();
-        self.combo_if_type = QComboBox();
-        self.combo_if_type.addItems(["Copper", "Fiber"]);
-        self.combo_if_mode = QComboBox();
-        self.combo_if_mode.addItems(["L2 Access", "L2 Trunk", "L3 Routed", "Port-Channel Member"]);
-        form_basic.addRow(self.if_label);
-        form_basic.addRow("상태:", self.cb_if_shutdown);
-        form_basic.addRow("설명:", self.le_if_description);
-        form_basic.addRow("포트 유형:", self.combo_if_type);
-        form_basic.addRow("인터페이스 모드:", self.combo_if_mode);
-        group_basic.setLayout(form_basic);
-        config_layout.addWidget(group_basic);
-        self.mode_stack = QStackedWidget();
-        config_layout.addWidget(self.mode_stack);
+        tab = QWidget()
+        main_layout = QHBoxLayout(tab)
+
+        left_widget = QWidget()
+        left_layout = QVBoxLayout(left_widget)
+        left_layout.addWidget(QLabel("설정할 인터페이스 목록 (Ctrl, Shift로 다중 선택 가능)"))
+        self.interface_list = QListWidget()
+        self.interface_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        left_layout.addWidget(self.interface_list)
+        warning_label = QLabel("주의: 물리적 구성이 동일한\n장비 그룹별로 작업하십시오.")
+        warning_label.setStyleSheet("color: red; font-weight: bold;")
+        left_layout.addWidget(warning_label)
+        btn_layout = QHBoxLayout()
+        self.btn_add_interface = QPushButton("인터페이스 추가")
+        self.btn_add_port_channel = QPushButton("Port-Channel 추가")
+        self.btn_remove_interface = QPushButton("목록에서 삭제")
+        btn_layout.addWidget(self.btn_add_interface)
+        btn_layout.addWidget(self.btn_add_port_channel)
+        left_layout.addLayout(btn_layout)
+        left_layout.addWidget(self.btn_remove_interface)
+        main_layout.addWidget(left_widget, 2)
+
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        right_widget = QWidget()
+        config_layout = QVBoxLayout(right_widget)
+        scroll_area.setWidget(right_widget)
+        main_layout.addWidget(scroll_area, 5)
+
+        self.config_area_widget = QWidget()
+        config_layout.addWidget(self.config_area_widget)
+        form_layout = QVBoxLayout(self.config_area_widget)
+
+        group_basic = QGroupBox("기본 설정")
+        form_basic = QFormLayout()
+        self.if_label = QLabel("왼쪽 목록에서 인터페이스를 선택하세요.")
+        self.cb_if_shutdown = QCheckBox("Shutdown")
+        self.le_if_description = QLineEdit()
+        self.combo_if_type = QComboBox()
+        self.combo_if_type.addItems(["Copper", "Fiber"])
+        self.combo_if_mode = QComboBox()
+        self.combo_if_mode.addItems(["L2 Access", "L2 Trunk", "L3 Routed", "Port-Channel Member"])
+        form_basic.addRow(self.if_label)
+        form_basic.addRow("상태:", self.cb_if_shutdown)
+        form_basic.addRow("설명:", self.le_if_description)
+        form_basic.addRow("포트 유형:", self.combo_if_type)
+        form_basic.addRow("인터페이스 모드:", self.combo_if_mode)
+        group_basic.setLayout(form_basic)
+        form_layout.addWidget(group_basic)
+
+        self.mode_stack = QStackedWidget()
+        form_layout.addWidget(self.mode_stack)
+
         stack_access = QWidget();
         form_access = QFormLayout(stack_access);
         self.le_access_vlan = QLineEdit();
         self.le_voice_vlan = QLineEdit();
         form_access.addRow("Access VLAN:", self.le_access_vlan);
         form_access.addRow("Voice VLAN:", self.le_voice_vlan);
-        self.mode_stack.addWidget(stack_access);
+        self.mode_stack.addWidget(stack_access)
         stack_trunk = QWidget();
         form_trunk = QFormLayout(stack_trunk);
         self.le_trunk_native = QLineEdit();
         self.le_trunk_allowed = QLineEdit();
         form_trunk.addRow("Native VLAN:", self.le_trunk_native);
         form_trunk.addRow("Allowed VLANs:", self.le_trunk_allowed);
-        self.mode_stack.addWidget(stack_trunk);
+        self.mode_stack.addWidget(stack_trunk)
         stack_routed = QWidget();
         form_routed = QFormLayout(stack_routed);
         self.le_routed_ip = QLineEdit();
         form_routed.addRow("IP 주소/Prefix:", self.le_routed_ip);
-        self.mode_stack.addWidget(stack_routed);
+        self.mode_stack.addWidget(stack_routed)
         stack_pc_member = QWidget();
         form_pc_member = QFormLayout(stack_pc_member);
         self.le_channel_group_id = QLineEdit();
@@ -408,14 +419,15 @@ class MainWindow(QMainWindow):
         self.combo_channel_group_mode.addItems(["active", "passive", "on"]);
         form_pc_member.addRow("Channel-Group ID:", self.le_channel_group_id);
         form_pc_member.addRow("LACP 모드:", self.combo_channel_group_mode);
-        self.mode_stack.addWidget(stack_pc_member);
+        self.mode_stack.addWidget(stack_pc_member)
+
         self.group_if_stp = QGroupBox("Spanning Tree");
         form_stp = QFormLayout(self.group_if_stp);
         self.cb_stp_portfast = QCheckBox("Portfast 활성화 (Edge port)");
         self.cb_stp_bpduguard = QCheckBox("BPDU Guard 활성화");
         form_stp.addRow(self.cb_stp_portfast);
         form_stp.addRow(self.cb_stp_bpduguard);
-        config_layout.addWidget(self.group_if_stp);
+        form_layout.addWidget(self.group_if_stp)
         self.group_if_port_security = QGroupBox("Port Security");
         form_ps = QFormLayout(self.group_if_port_security);
         self.cb_ps_enabled = QCheckBox("Port Security 활성화");
@@ -425,7 +437,7 @@ class MainWindow(QMainWindow):
         form_ps.addRow(self.cb_ps_enabled);
         form_ps.addRow("최대 MAC 주소 수:", self.le_ps_max_mac);
         form_ps.addRow("Violation 모드:", self.combo_ps_violation);
-        config_layout.addWidget(self.group_if_port_security);
+        form_layout.addWidget(self.group_if_port_security)
         self.group_if_storm_control = QGroupBox("Storm Control");
         form_sc = QFormLayout(self.group_if_storm_control);
         self.le_sc_broadcast = QLineEdit("10.00");
@@ -437,8 +449,8 @@ class MainWindow(QMainWindow):
         form_sc.addRow("Multicast Level (%):", self.le_sc_multicast);
         form_sc.addRow("Unicast Level (%):", self.le_sc_unicast);
         form_sc.addRow("Action:", self.combo_sc_action);
-        config_layout.addWidget(self.group_if_storm_control);
-        self.group_if_udld = QGroupBox("UDLD (UniDirectional Link Detection)");
+        form_layout.addWidget(self.group_if_storm_control)
+        self.group_if_udld = QGroupBox("UDLD");
         form_udld = QFormLayout(self.group_if_udld);
         self.cb_udld_enabled = QCheckBox("UDLD 활성화");
         self.combo_udld_mode = QComboBox();
@@ -447,15 +459,16 @@ class MainWindow(QMainWindow):
         self.cb_udld_enabled.toggled.connect(self.combo_udld_mode.setEnabled);
         form_udld.addRow(self.cb_udld_enabled);
         form_udld.addRow("모드:", self.combo_udld_mode);
-        config_layout.addWidget(self.group_if_udld);
-        self.right_layout.addStretch();
-        self.config_area_widget.setVisible(False);
+        form_layout.addWidget(self.group_if_udld)
+
+        config_layout.addStretch()
+        self.config_area_widget.setVisible(False)
         return tab
 
     def _create_vlan_tab(self):
-        tab, layout = self._create_scrollable_tab();
-        self.cb_ip_routing = QCheckBox("Enable Inter-VLAN Routing (ip routing)");
-        layout.addWidget(self.cb_ip_routing);
+        tab, layout = self._create_scrollable_tab()
+        self.cb_ip_routing = QCheckBox("Enable Inter-VLAN Routing (ip routing)")
+        layout.addWidget(self.cb_ip_routing)
         group_vlan = QGroupBox("1. VLAN 생성 및 관리");
         vlan_layout = QVBoxLayout();
         self.vlan_table = QTableWidget(0, 3);
@@ -471,7 +484,7 @@ class MainWindow(QMainWindow):
         vlan_layout.addLayout(vlan_button_layout);
         vlan_layout.addWidget(self.vlan_table);
         group_vlan.setLayout(vlan_layout);
-        layout.addWidget(group_vlan);
+        layout.addWidget(group_vlan)
         self.group_svi = QGroupBox("2. SVI (Vlan Interface) 설정");
         svi_layout = QVBoxLayout();
         self.svi_label = QLabel("상단 테이블에서 설정을 원하는 VLAN을 선택하세요.");
@@ -512,103 +525,187 @@ class MainWindow(QMainWindow):
         svi_layout.addWidget(self.group_dhcp_helper);
         self.group_svi.setLayout(svi_layout);
         self.group_svi.setEnabled(False);
-        layout.addWidget(self.group_svi);
-        layout.addStretch();
+        layout.addWidget(self.group_svi)
+        layout.addStretch()
         return tab
 
     def _create_switching_tab(self):
         tab, layout = self._create_scrollable_tab()
-
-        # Spanning Tree Protocol
-        group_stp = QGroupBox("Spanning Tree Protocol (STP)")
-        form_stp = QFormLayout()
-        self.combo_stp_mode = QComboBox()
-        self.combo_stp_mode.addItems(["rapid-pvst", "pvst", "mst"])
-        self.le_stp_priority = QLineEdit()
-        self.le_stp_priority.setPlaceholderText("예: 4096 (0-61440, 4096 단위)")
-        self.cb_stp_portfast_default = QCheckBox("spanning-tree portfast default")
-        self.cb_stp_bpduguard_default = QCheckBox("spanning-tree portfast bpduguard default")
-        self.cb_stp_bpdufilter_default = QCheckBox("spanning-tree portfast bpdufilter default")
-        self.cb_stp_loopguard_default = QCheckBox("spanning-tree loopguard default")
-
-        form_stp.addRow("STP Mode:", self.combo_stp_mode)
-        form_stp.addRow("Root Bridge Priority (VLAN 1-4094):", self.le_stp_priority)
-        form_stp.addRow(self.cb_stp_portfast_default)
-        form_stp.addRow(self.cb_stp_bpduguard_default)
-        form_stp.addRow(self.cb_stp_bpdufilter_default)
-        form_stp.addRow(self.cb_stp_loopguard_default)
-        group_stp.setLayout(form_stp)
+        group_stp = QGroupBox("Spanning Tree Protocol (STP)");
+        form_stp = QFormLayout();
+        self.combo_stp_mode = QComboBox();
+        self.combo_stp_mode.addItems(["rapid-pvst", "pvst", "mst"]);
+        self.le_stp_priority = QLineEdit();
+        self.cb_stp_portfast_default = QCheckBox("spanning-tree portfast default");
+        self.cb_stp_bpduguard_default = QCheckBox("spanning-tree portfast bpduguard default");
+        self.cb_stp_bpdufilter_default = QCheckBox("spanning-tree portfast bpdufilter default");
+        self.cb_stp_loopguard_default = QCheckBox("spanning-tree loopguard default");
+        form_stp.addRow("STP Mode:", self.combo_stp_mode);
+        form_stp.addRow("Root Bridge Priority (VLAN 1-4094):", self.le_stp_priority);
+        form_stp.addRow(self.cb_stp_portfast_default);
+        form_stp.addRow(self.cb_stp_bpduguard_default);
+        form_stp.addRow(self.cb_stp_bpdufilter_default);
+        form_stp.addRow(self.cb_stp_loopguard_default);
+        group_stp.setLayout(form_stp);
         layout.addWidget(group_stp)
-
-        # MST Configuration (동적 UI)
-        self.group_mst_config = QGroupBox("MST Configuration")
-        mst_layout = QVBoxLayout()
-        mst_form = QFormLayout()
-        self.le_mst_name = QLineEdit()
-        self.le_mst_revision = QLineEdit("0")
-        mst_form.addRow("Configuration Name:", self.le_mst_name)
-        mst_form.addRow("Revision Number:", self.le_mst_revision)
-        mst_layout.addLayout(mst_form)
-
-        self.mst_instance_table = QTableWidget(0, 2)
-        self.mst_instance_table.setHorizontalHeaderLabels(["Instance ID", "VLANs (예: 10,20,30-40)"])
-        self.mst_instance_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        mst_btn_layout = QHBoxLayout()
-        self.btn_add_mst_instance = QPushButton("Instance 추가")
-        self.btn_remove_mst_instance = QPushButton("Instance 삭제")
-        mst_btn_layout.addWidget(self.btn_add_mst_instance)
-        mst_btn_layout.addWidget(self.btn_remove_mst_instance)
-        mst_layout.addLayout(mst_btn_layout)
-        mst_layout.addWidget(self.mst_instance_table)
-        self.group_mst_config.setLayout(mst_layout)
-        self.group_mst_config.setVisible(False)  # 처음에는 숨김
+        self.group_mst_config = QGroupBox("MST Configuration");
+        mst_layout = QVBoxLayout();
+        mst_form = QFormLayout();
+        self.le_mst_name = QLineEdit();
+        self.le_mst_revision = QLineEdit("0");
+        mst_form.addRow("Configuration Name:", self.le_mst_name);
+        mst_form.addRow("Revision Number:", self.le_mst_revision);
+        mst_layout.addLayout(mst_form);
+        self.mst_instance_table = QTableWidget(0, 2);
+        self.mst_instance_table.setHorizontalHeaderLabels(["Instance ID", "VLANs (예: 10,20,30-40)"]);
+        self.mst_instance_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch);
+        mst_btn_layout = QHBoxLayout();
+        self.btn_add_mst_instance = QPushButton("Instance 추가");
+        self.btn_remove_mst_instance = QPushButton("Instance 삭제");
+        mst_btn_layout.addWidget(self.btn_add_mst_instance);
+        mst_btn_layout.addWidget(self.btn_remove_mst_instance);
+        mst_layout.addLayout(mst_btn_layout);
+        mst_layout.addWidget(self.mst_instance_table);
+        self.group_mst_config.setLayout(mst_layout);
+        self.group_mst_config.setVisible(False);
         layout.addWidget(self.group_mst_config)
-
-        # VLAN Trunking Protocol (VTP)
-        group_vtp = QGroupBox("VLAN Trunking Protocol (VTP)")
-        form_vtp = QFormLayout()
-        self.cb_vtp_enabled = QCheckBox("Enable VTP")
-        self.combo_vtp_mode = QComboBox()
-        self.combo_vtp_mode.addItems(["transparent", "server", "client", "off"])
-        self.le_vtp_domain = QLineEdit()
-        self.le_vtp_password = QLineEdit()
-        self.le_vtp_password.setEchoMode(QLineEdit.Password)
-        self.combo_vtp_version = QComboBox()
-        self.combo_vtp_version.addItems(["2", "1", "3"])
-        form_vtp.addRow(self.cb_vtp_enabled)
-        form_vtp.addRow("Mode:", self.combo_vtp_mode)
-        form_vtp.addRow("Domain:", self.le_vtp_domain)
-        form_vtp.addRow("Password:", self.le_vtp_password)
-        form_vtp.addRow("Version:", self.combo_vtp_version)
-        group_vtp.setLayout(form_vtp)
+        group_vtp = QGroupBox("VLAN Trunking Protocol (VTP)");
+        form_vtp = QFormLayout();
+        self.cb_vtp_enabled = QCheckBox("Enable VTP");
+        self.combo_vtp_mode = QComboBox();
+        self.combo_vtp_mode.addItems(["transparent", "server", "client", "off"]);
+        self.le_vtp_domain = QLineEdit();
+        self.le_vtp_password = QLineEdit();
+        self.le_vtp_password.setEchoMode(QLineEdit.Password);
+        self.combo_vtp_version = QComboBox();
+        self.combo_vtp_version.addItems(["2", "1", "3"]);
+        form_vtp.addRow(self.cb_vtp_enabled);
+        form_vtp.addRow("Mode:", self.combo_vtp_mode);
+        form_vtp.addRow("Domain:", self.le_vtp_domain);
+        form_vtp.addRow("Password:", self.le_vtp_password);
+        form_vtp.addRow("Version:", self.combo_vtp_version);
+        group_vtp.setLayout(form_vtp);
         layout.addWidget(group_vtp)
-
-        # L2 Security
-        group_l2_security = QGroupBox("L2 Security")
-        form_l2_sec = QFormLayout()
-        self.cb_dhcp_snooping_enabled = QCheckBox("Enable DHCP Snooping (Global)")
-        self.le_dhcp_snooping_vlans = QLineEdit()
-        self.le_dhcp_snooping_vlans.setPlaceholderText("쉼표로 구분된 VLAN ID (예: 10,20,30-40)")
-        self.le_dai_vlans = QLineEdit()
-        self.le_dai_vlans.setPlaceholderText("쉼표로 구분된 VLAN ID (예: 10,20,30-40)")
-        form_l2_sec.addRow(self.cb_dhcp_snooping_enabled)
-        form_l2_sec.addRow("DHCP Snooping VLANs:", self.le_dhcp_snooping_vlans)
-        form_l2_sec.addRow("Dynamic ARP Inspection (DAI) VLANs:", self.le_dai_vlans)
-        group_l2_security.setLayout(form_l2_sec)
+        group_l2_security = QGroupBox("L2 Security");
+        form_l2_sec = QFormLayout();
+        self.cb_dhcp_snooping_enabled = QCheckBox("Enable DHCP Snooping (Global)");
+        self.le_dhcp_snooping_vlans = QLineEdit();
+        self.le_dai_vlans = QLineEdit();
+        form_l2_sec.addRow(self.cb_dhcp_snooping_enabled);
+        form_l2_sec.addRow("DHCP Snooping VLANs:", self.le_dhcp_snooping_vlans);
+        form_l2_sec.addRow("Dynamic ARP Inspection (DAI) VLANs:", self.le_dai_vlans);
+        group_l2_security.setLayout(form_l2_sec);
         layout.addWidget(group_l2_security)
-
         layout.addStretch()
         return tab
 
-
     def _create_routing_tab(self):
-        tab, layout = self._create_scrollable_tab();
-        layout.addWidget(QLabel("Static, OSPF, BGP, VRRP 등 라우팅 설정 기능이 여기에 구현됩니다."));
-        layout.addStretch();
+        tab, layout = self._create_scrollable_tab()
+        routing_tabs = QTabWidget();
+        layout.addWidget(routing_tabs)
+        static_tab = QWidget();
+        static_layout = QVBoxLayout(static_tab);
+        self.static_route_table = QTableWidget(0, 4);
+        self.static_route_table.setHorizontalHeaderLabels(
+            ["Destination Prefix (예: 1.1.1.0/24)", "Next-Hop IP / Interface", "Metric", "VRF"]);
+        self.static_route_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch);
+        static_btn_layout = QHBoxLayout();
+        self.btn_add_static_route = QPushButton("정적 경로 추가");
+        self.btn_remove_static_route = QPushButton("정적 경로 삭제");
+        static_btn_layout.addWidget(self.btn_add_static_route);
+        static_btn_layout.addWidget(self.btn_remove_static_route);
+        static_layout.addLayout(static_btn_layout);
+        static_layout.addWidget(self.static_route_table);
+        routing_tabs.addTab(static_tab, "Static")
+        ospf_tab = QWidget();
+        ospf_layout = QVBoxLayout(ospf_tab);
+        group_ospf_global = QGroupBox("OSPF Global Settings");
+        form_ospf_global = QFormLayout();
+        self.cb_ospf_enabled = QCheckBox("Enable OSPF");
+        self.le_ospf_process_id = QLineEdit("1");
+        self.le_ospf_router_id = QLineEdit();
+        form_ospf_global.addRow(self.cb_ospf_enabled);
+        form_ospf_global.addRow("Process ID:", self.le_ospf_process_id);
+        form_ospf_global.addRow("Router ID:", self.le_ospf_router_id);
+        group_ospf_global.setLayout(form_ospf_global);
+        ospf_layout.addWidget(group_ospf_global);
+        group_ospf_networks = QGroupBox("Networks to Advertise");
+        layout_ospf_networks = QVBoxLayout(group_ospf_networks);
+        self.ospf_network_table = QTableWidget(0, 3);
+        self.ospf_network_table.setHorizontalHeaderLabels(["Network Address", "Wildcard Mask", "Area"]);
+        self.ospf_network_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch);
+        ospf_net_btn_layout = QHBoxLayout();
+        self.btn_add_ospf_net = QPushButton("네트워크 추가");
+        self.btn_remove_ospf_net = QPushButton("네트워크 삭제");
+        ospf_net_btn_layout.addWidget(self.btn_add_ospf_net);
+        ospf_net_btn_layout.addWidget(self.btn_remove_ospf_net);
+        layout_ospf_networks.addLayout(ospf_net_btn_layout);
+        layout_ospf_networks.addWidget(self.ospf_network_table);
+        ospf_layout.addWidget(group_ospf_networks);
+        routing_tabs.addTab(ospf_tab, "OSPF")
+        eigrp_tab = QWidget();
+        eigrp_layout = QVBoxLayout(eigrp_tab);
+        group_eigrp_global = QGroupBox("EIGRP Global Settings");
+        form_eigrp_global = QFormLayout();
+        self.cb_eigrp_enabled = QCheckBox("Enable EIGRP");
+        self.le_eigrp_as_number = QLineEdit("100");
+        self.le_eigrp_router_id = QLineEdit();
+        form_eigrp_global.addRow(self.cb_eigrp_enabled);
+        form_eigrp_global.addRow("AS Number:", self.le_eigrp_as_number);
+        form_eigrp_global.addRow("Router ID:", self.le_eigrp_router_id);
+        group_eigrp_global.setLayout(form_eigrp_global);
+        eigrp_layout.addWidget(group_eigrp_global);
+        group_eigrp_networks = QGroupBox("Networks to Advertise");
+        layout_eigrp_networks = QVBoxLayout(group_eigrp_networks);
+        self.eigrp_network_table = QTableWidget(0, 2);
+        self.eigrp_network_table.setHorizontalHeaderLabels(["Network Address", "Wildcard Mask (Optional)"]);
+        self.eigrp_network_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch);
+        eigrp_net_btn_layout = QHBoxLayout();
+        self.btn_add_eigrp_net = QPushButton("네트워크 추가");
+        self.btn_remove_eigrp_net = QPushButton("네트워크 삭제");
+        eigrp_net_btn_layout.addWidget(self.btn_add_eigrp_net);
+        eigrp_net_btn_layout.addWidget(self.btn_remove_eigrp_net);
+        layout_eigrp_networks.addLayout(eigrp_net_btn_layout);
+        layout_eigrp_networks.addWidget(self.eigrp_network_table);
+        eigrp_layout.addWidget(group_eigrp_networks);
+        routing_tabs.addTab(eigrp_tab, "EIGRP")
+        bgp_tab = QWidget();
+        bgp_layout = QVBoxLayout(bgp_tab);
+        group_bgp_global = QGroupBox("BGP Global Settings");
+        form_bgp_global = QFormLayout();
+        self.cb_bgp_enabled = QCheckBox("Enable BGP");
+        self.le_bgp_as_number = QLineEdit("65001");
+        self.le_bgp_router_id = QLineEdit();
+        form_bgp_global.addRow(self.cb_bgp_enabled);
+        form_bgp_global.addRow("Local AS Number:", self.le_bgp_as_number);
+        form_bgp_global.addRow("Router ID:", self.le_bgp_router_id);
+        group_bgp_global.setLayout(form_bgp_global);
+        bgp_layout.addWidget(group_bgp_global);
+        group_bgp_neighbors = QGroupBox("BGP Neighbors");
+        layout_bgp_neighbors = QVBoxLayout(group_bgp_neighbors);
+        self.bgp_neighbor_table = QTableWidget(0, 6);
+        self.bgp_neighbor_table.setHorizontalHeaderLabels(
+            ["Neighbor IP", "Remote AS", "Description", "Update Source", "Route-Map IN", "Route-Map OUT"]);
+        self.bgp_neighbor_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch);
+        bgp_neighbor_btn_layout = QHBoxLayout();
+        self.btn_add_bgp_neighbor = QPushButton("Neighbor 추가");
+        self.btn_remove_bgp_neighbor = QPushButton("Neighbor 삭제");
+        bgp_neighbor_btn_layout.addWidget(self.btn_add_bgp_neighbor);
+        bgp_neighbor_btn_layout.addWidget(self.btn_remove_bgp_neighbor);
+        layout_bgp_neighbors.addLayout(bgp_neighbor_btn_layout);
+        layout_bgp_neighbors.addWidget(self.bgp_neighbor_table);
+        bgp_layout.addWidget(group_bgp_neighbors);
+        group_bgp_networks = QGroupBox("Networks to Advertise");
+        layout_bgp_networks = QVBoxLayout(group_bgp_networks);
+        layout_bgp_networks.addWidget(QLabel("광고할 네트워크 Prefix 목록 (한 줄에 하나씩)"));
+        self.te_bgp_networks = QPlainTextEdit();
+        layout_bgp_networks.addWidget(self.te_bgp_networks);
+        bgp_layout.addWidget(group_bgp_networks);
+        routing_tabs.addTab(bgp_tab, "BGP")
         return tab
 
     def _create_ha_tab(self):
-        tab, layout = self._create_scrollable_tab();
+        tab, layout = self._create_scrollable_tab()
         self.group_svl = QGroupBox("StackWise Virtual (IOS-XE only)");
         form_svl = QFormLayout();
         self.cb_svl_enabled = QCheckBox("Enable StackWise Virtual");
@@ -616,7 +713,7 @@ class MainWindow(QMainWindow):
         form_svl.addRow(self.cb_svl_enabled);
         form_svl.addRow("Domain ID:", self.le_svl_domain);
         self.group_svl.setLayout(form_svl);
-        layout.addWidget(self.group_svl);
+        layout.addWidget(self.group_svl)
         self.group_vpc = QGroupBox("vPC - Virtual Port-Channel (NX-OS only)");
         form_vpc = QFormLayout();
         self.cb_vpc_enabled = QCheckBox("Enable vPC");
@@ -626,12 +723,12 @@ class MainWindow(QMainWindow):
         form_vpc.addRow("Domain ID:", self.le_vpc_domain);
         form_vpc.addRow("Peer-Keepalive:", self.le_vpc_peer_keepalive);
         self.group_vpc.setLayout(form_vpc);
-        layout.addWidget(self.group_vpc);
-        layout.addStretch();
+        layout.addWidget(self.group_vpc)
+        layout.addStretch()
         return tab
 
     def _create_security_tab(self):
-        tab, layout = self._create_scrollable_tab();
+        tab, layout = self._create_scrollable_tab()
         group_aaa = QGroupBox("AAA");
         form_aaa = QFormLayout();
         self.cb_aaa_new_model = QCheckBox("aaa new-model 활성화");
@@ -646,9 +743,9 @@ class MainWindow(QMainWindow):
         form_aaa.addRow("Authentication Login:", self.le_aaa_auth_login);
         form_aaa.addRow("Authorization Exec:", self.le_aaa_auth_exec);
         form_aaa.addRow(self.btn_add_aaa_group, self.btn_remove_aaa_group);
-        form_aaa.addRow("AAA Server Groups:", self.aaa_server_table);
+        form_aaa.addRow(self.aaa_server_table);
         group_aaa.setLayout(form_aaa);
-        layout.addWidget(group_aaa);
+        layout.addWidget(group_aaa)
         group_users = QGroupBox("Local User Accounts");
         users_layout = QVBoxLayout();
         self.users_table = QTableWidget(0, 3);
@@ -662,7 +759,7 @@ class MainWindow(QMainWindow):
         users_layout.addLayout(users_button_layout);
         users_layout.addWidget(self.users_table);
         group_users.setLayout(users_layout);
-        layout.addWidget(group_users);
+        layout.addWidget(group_users)
         group_line = QGroupBox("Line Configuration (Console/VTY)");
         form_line = QFormLayout();
         self.le_con_exec_timeout = QLineEdit("15 0");
@@ -684,7 +781,7 @@ class MainWindow(QMainWindow):
         form_line.addRow("VTY Timeout (min sec):", self.le_vty_exec_timeout);
         form_line.addRow("VTY Transport Input:", self.combo_vty_transport);
         group_line.setLayout(form_line);
-        layout.addWidget(group_line);
+        layout.addWidget(group_line)
         group_snmp = QGroupBox("SNMP");
         snmp_layout = QVBoxLayout();
         snmp_form = QFormLayout();
@@ -724,7 +821,7 @@ class MainWindow(QMainWindow):
         group_snmp_v3.setLayout(snmp_v3_layout);
         snmp_layout.addWidget(group_snmp_v3);
         group_snmp.setLayout(snmp_layout);
-        layout.addWidget(group_snmp);
+        layout.addWidget(group_snmp)
         group_hardening = QGroupBox("Security Hardening");
         form_hardening = QFormLayout();
         self.cb_no_ip_http = QCheckBox("no ip http server & secure-server");
@@ -736,8 +833,8 @@ class MainWindow(QMainWindow):
         form_hardening.addRow(self.cb_no_cdp);
         form_hardening.addRow(self.cb_lldp);
         group_hardening.setLayout(form_hardening);
-        layout.addWidget(group_hardening);
-        layout.addStretch();
+        layout.addWidget(group_hardening)
+        layout.addStretch()
         return tab
 
     # --- 신호 연결 메서드 ---
@@ -790,6 +887,16 @@ class MainWindow(QMainWindow):
         self.combo_stp_mode.currentTextChanged.connect(self._update_mst_ui_visibility)
         self.btn_add_mst_instance.clicked.connect(lambda: self.ui_add_table_row(self.mst_instance_table))
         self.btn_remove_mst_instance.clicked.connect(lambda: self.ui_remove_table_row(self.mst_instance_table))
+
+        # Routing 탭
+        self.btn_add_static_route.clicked.connect(lambda: self.ui_add_table_row(self.static_route_table))
+        self.btn_remove_static_route.clicked.connect(lambda: self.ui_remove_table_row(self.static_route_table))
+        self.btn_add_ospf_net.clicked.connect(lambda: self.ui_add_table_row(self.ospf_network_table))
+        self.btn_remove_ospf_net.clicked.connect(lambda: self.ui_remove_table_row(self.ospf_network_table))
+        self.btn_add_eigrp_net.clicked.connect(lambda: self.ui_add_table_row(self.eigrp_network_table))
+        self.btn_remove_eigrp_net.clicked.connect(lambda: self.ui_remove_table_row(self.eigrp_network_table))
+        self.btn_add_bgp_neighbor.clicked.connect(lambda: self.ui_add_table_row(self.bgp_neighbor_table))
+        self.btn_remove_bgp_neighbor.clicked.connect(lambda: self.ui_remove_table_row(self.bgp_neighbor_table))
 
         # 글로벌 탭
         self.btn_add_dns.clicked.connect(lambda: self.ui_add_table_row(self.dns_table));
@@ -1081,14 +1188,6 @@ class MainWindow(QMainWindow):
 
         settings = {'global': {}, 'interfaces': [], 'vlans': {}, 'switching': {}, 'routing': {}, 'ha': {},
                     'security': {}}
-        # Switching Tab
-        s = data['switching']
-        s['stp_mode'] = self.combo_stp_mode.currentText()
-        s['stp_priority'] = self.le_stp_priority.text()
-        s['stp_portfast_default'] = self.cb_stp_portfast_default.isChecked()
-        s['stp_bpduguard_default'] = self.cb_stp_bpduguard_default.isChecked()
-        s['stp_bpdufilter_default'] = self.cb_stp_bpdufilter_default.isChecked()
-        s['stp_loopguard_default'] = self.cb_stp_loopguard_default.isChecked()
 
         s['mst'] = {
             'name': self.le_mst_name.text(),
@@ -1206,6 +1305,43 @@ class MainWindow(QMainWindow):
                 self.snmp_v3_user_table.item(r, 0) and self.snmp_v3_user_table.item(r, 0).text()]};
         sec['hardening'] = {'no_ip_http': self.cb_no_ip_http.isChecked(), 'no_cdp': self.cb_no_cdp.isChecked(),
                             'lldp': self.cb_lldp.isChecked()}
+        # Switching Tab
+        s = data['switching']
+        s['stp_mode'] = self.combo_stp_mode.currentText()
+        s['stp_priority'] = self.le_stp_priority.text()
+        s['stp_portfast_default'] = self.cb_stp_portfast_default.isChecked()
+        s['stp_bpduguard_default'] = self.cb_stp_bpduguard_default.isChecked()
+        s['stp_bpdufilter_default'] = self.cb_stp_bpdufilter_default.isChecked()
+        s['stp_loopguard_default'] = self.cb_stp_loopguard_default.isChecked()
+
+        # Routing Tab
+        r = settings['routing']
+        r['static_routes'] = [
+            {'prefix': self.static_route_table.item(i, 0).text(), 'nexthop': self.static_route_table.item(i, 1).text(),
+             'metric': self.static_route_table.item(i, 2).text(), 'vrf': self.static_route_table.item(i, 3).text()} for
+            i in range(self.static_route_table.rowCount()) if self.static_route_table.item(i, 0)]
+        r['ospf'] = {'enabled': self.cb_ospf_enabled.isChecked(), 'process_id': self.le_ospf_process_id.text(),
+                     'router_id': self.le_ospf_router_id.text(), 'networks': [
+                {'prefix': self.ospf_network_table.item(i, 0).text(),
+                 'wildcard': self.ospf_network_table.item(i, 1).text(),
+                 'area': self.ospf_network_table.item(i, 2).text()} for i in range(self.ospf_network_table.rowCount())
+                if self.ospf_network_table.item(i, 0)]}
+        r['eigrp'] = {'enabled': self.cb_eigrp_enabled.isChecked(), 'as_number': self.le_eigrp_as_number.text(),
+                      'router_id': self.le_eigrp_router_id.text(), 'networks': [
+                {'prefix': self.eigrp_network_table.item(i, 0).text(),
+                 'wildcard': self.eigrp_network_table.item(i, 1).text()} for i in
+                range(self.eigrp_network_table.rowCount()) if self.eigrp_network_table.item(i, 0)]}
+        r['bgp'] = {'enabled': self.cb_bgp_enabled.isChecked(), 'as_number': self.le_bgp_as_number.text(),
+                    'router_id': self.le_bgp_router_id.text(), 'neighbors': [
+                {'ip': self.bgp_neighbor_table.item(i, 0).text(),
+                 'remote_as': self.bgp_neighbor_table.item(i, 1).text(),
+                 'description': self.bgp_neighbor_table.item(i, 2).text(),
+                 'update_source': self.bgp_neighbor_table.item(i, 3).text(),
+                 'rmap_in': self.bgp_neighbor_table.item(i, 4).text(),
+                 'rmap_out': self.bgp_neighbor_table.item(i, 5).text()} for i in
+                range(self.bgp_neighbor_table.rowCount()) if self.bgp_neighbor_table.item(i, 0)],
+                    'networks': [line.strip() for line in self.te_bgp_networks.toPlainText().splitlines() if
+                                 line.strip()]}
 
         return {
             "devices": devices,
@@ -1293,8 +1429,35 @@ class MainWindow(QMainWindow):
             self.vlan_table.item(row, 0).setData(Qt.UserRole, vlan_data.get('svi', {}))
 
         # ... (다른 모든 탭의 데이터 적용 로직 추가) ...
+
+
         self.config_area_widget.setVisible(False)
         self._block_interface_signals(False)
+        # Routing 탭 복원
+        r = settings.get('routing', {})
+        self.static_route_table.setRowCount(0)
+        for route in r.get('static_routes', []):
+            row = self.static_route_table.rowCount();
+            self.static_route_table.insertRow(row)
+            self.static_route_table.setItem(row, 0, QTableWidgetItem(route.get('prefix')))
+            self.static_route_table.setItem(row, 1, QTableWidgetItem(route.get('nexthop')))
+            self.static_route_table.setItem(row, 2, QTableWidgetItem(route.get('metric')))
+            self.static_route_table.setItem(row, 3, QTableWidgetItem(route.get('vrf')))
+
+        ospf = r.get('ospf', {})
+        self.cb_ospf_enabled.setChecked(ospf.get('enabled', False))
+        self.le_ospf_process_id.setText(ospf.get('process_id', '1'))
+        self.le_ospf_router_id.setText(ospf.get('router_id', ''))
+        self.ospf_network_table.setRowCount(0)
+        for net in ospf.get('networks', []):
+            row = self.ospf_network_table.rowCount();
+            self.ospf_network_table.insertRow(row)
+            self.ospf_network_table.setItem(row, 0, QTableWidgetItem(net.get('prefix')))
+            self.ospf_network_table.setItem(row, 1, QTableWidgetItem(net.get('wildcard')))
+            self.ospf_network_table.setItem(row, 2, QTableWidgetItem(net.get('area')))
+
+        # (EIGRP, BGP 복원 로직도 위와 유사한 패턴으로 추가)
+
         self._update_ui_for_os()
 
         # Switching 탭 복원

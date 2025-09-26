@@ -1,6 +1,6 @@
 # ansible_config_editor/core/playbook_manager.py
 import yaml
-from typing import Dict, List, Any, Tuple
+from typing import Dict, List, Any
 
 
 class ConfigManager:
@@ -33,11 +33,10 @@ class ConfigManager:
         playbook['tasks'].extend(self._generate_global_tasks(os_type, config_data.get('global', {})))
         playbook['tasks'].extend(self._generate_vlan_tasks(os_type, config_data.get('vlans', {})))
         playbook['tasks'].extend(self._generate_switching_tasks(os_type, config_data.get('switching', {})))
-        playbook['tasks'].extend(
-            self._generate_interface_tasks(os_type, config_data.get('interfaces', [])))  # ! 기본값을 리스트로 변경
+        playbook['tasks'].extend(self._generate_interface_tasks(os_type, config_data.get('interfaces', [])))
+        playbook['tasks'].extend(self._generate_routing_tasks(os_type, config_data.get('routing', {})))
         playbook['tasks'].extend(self._generate_ha_tasks(os_type, config_data.get('ha', {})))
         playbook['tasks'].extend(self._generate_security_tasks(os_type, config_data.get('security', {})))
-        playbook['tasks'].extend(self._generate_routing_tasks(os_type, config_data.get('routing', {})))
 
         return playbook
 
@@ -50,8 +49,7 @@ class ConfigManager:
         return str(sum(bin(int(x)).count('1') for x in netmask.split('.')))
 
     def _generate_global_tasks(self, os_type: str, global_config: Dict[str, Any]) -> List[Dict[str, Any]]:
-        # ... (이전과 동일)
-        tasks = [];
+        tasks = []
         commands = []
         if global_config.get('hostname'): commands.append(f"hostname {global_config['hostname']}")
         if global_config.get('service_timestamps'): commands.extend(
@@ -69,16 +67,18 @@ class ConfigManager:
                         f"ip name-server vrf {dns['vrf']} {dns['ip']}" if 'IOS-XE' in os_type else f"ip name-server {dns['ip']} use-vrf {dns['vrf']}")
                 else:
                     commands.append(f"ip name-server {dns['ip']}")
-        timezone = global_config.get('timezone', '');
-        if timezone: parts = timezone.split();
-        if len(parts) >= 2: tz_name, offset = parts[0], parts[1]; commands.append(
-            f"clock timezone {tz_name} {offset}" if 'IOS-XE' in os_type else f"clock timezone {tz_name} {offset} 0")
-        summer_time = global_config.get('summer_time', {});
+        timezone = global_config.get('timezone', '')
+        if timezone:
+            parts = timezone.split()
+            if len(parts) >= 2: tz_name, offset = parts[0], parts[1]; commands.append(
+                f"clock timezone {tz_name} {offset}" if 'IOS-XE' in os_type else f"clock timezone {tz_name} {offset} 0")
+        summer_time = global_config.get('summer_time', {})
         if summer_time.get('enabled') and summer_time.get('zone'): commands.append(
             f"clock summer-time {summer_time['zone']} recurring")
-        if global_config.get('logging_level'): level_num = global_config['logging_level'].split('(')[1].split(')')[
-            0] if '(' in global_config['logging_level'] else '6'; commands.append(
-            f"logging trap {level_num}" if 'IOS-XE' in os_type else f"logging level {level_num}")
+        if global_config.get('logging_level'):
+            level_num = global_config['logging_level'].split('(')[1].split(')')[0] if '(' in global_config[
+                'logging_level'] else '6'
+            commands.append(f"logging trap {level_num}" if 'IOS-XE' in os_type else f"logging level {level_num}")
         if global_config.get('logging_console'): commands.append("logging console")
         if global_config.get('logging_buffered'): commands.append(
             f"logging buffered {global_config.get('logging_buffer_size', '32000')}")
@@ -93,47 +93,48 @@ class ConfigManager:
         if global_config.get('ntp_authenticate'): commands.append("ntp authenticate")
         if global_config.get('ntp_master_stratum'): commands.append(f"ntp master {global_config['ntp_master_stratum']}")
         for ntp in global_config.get('ntp_servers', []):
-            if ntp.get('ip'): cmd = f"ntp server {ntp['ip']}";
-            if ntp.get('key_id'): cmd += f" key {ntp['key_id']}";
-            if ntp.get('prefer'): cmd += " prefer";
-            if ntp.get(
-                'vrf'): cmd += f" vrf {ntp['vrf']}" if 'IOS-XE' in os_type else f" use-vrf {ntp['vrf']}"; commands.append(
-                cmd)
-        mgmt = global_config.get('management', {});
+            if ntp.get('ip'):
+                cmd = f"ntp server {ntp['ip']}"
+                if ntp.get('key_id'): cmd += f" key {ntp['key_id']}"
+                if ntp.get('prefer'): cmd += " prefer"
+                if ntp.get('vrf'): cmd += f" vrf {ntp['vrf']}" if 'IOS-XE' in os_type else f" use-vrf {ntp['vrf']}"
+                commands.append(cmd)
+        mgmt = global_config.get('management', {})
         if mgmt.get('interface') and mgmt.get('ip'):
-            if 'IOS-XE' in os_type: commands.extend(
-                [f"interface {mgmt['interface']}", f" ip address {mgmt['ip']} {mgmt.get('subnet', '255.255.255.0')}",
-                 " no shutdown"]);
-            if mgmt.get('vrf'):
-                commands.insert(-1, f" vrf forwarding {mgmt['vrf']}")
+            if 'IOS-XE' in os_type:
+                commands.extend(
+                    [f"interface {mgmt['interface']}", f"ip address {mgmt['ip']} {mgmt.get('subnet', '255.255.255.0')}",
+                     "no shutdown"])
+                if mgmt.get('vrf'): commands.insert(-2, f"vrf forwarding {mgmt['vrf']}")
             elif 'NX-OS' in os_type:
                 commands.extend([f"interface {mgmt['interface']}",
-                                 f" ip address {mgmt['ip']}/{self._netmask_to_prefix(mgmt.get('subnet', '255.255.255.0'))}",
-                                 " no shutdown"]);
-            if mgmt.get('vrf'): commands.insert(-1, f" vrf member {mgmt['vrf']}")
+                                 f"ip address {mgmt['ip']}/{self._netmask_to_prefix(mgmt.get('subnet', '255.255.255.0'))}",
+                                 "no shutdown"])
+                if mgmt.get('vrf'): commands.insert(-2, f"vrf member {mgmt['vrf']}")
             if mgmt.get('gateway'):
                 if mgmt.get('vrf'):
                     if 'IOS-XE' in os_type:
                         commands.append(f"ip route vrf {mgmt['vrf']} 0.0.0.0 0.0.0.0 {mgmt['gateway']}")
                     elif 'NX-OS' in os_type:
-                        commands.extend([f"vrf context {mgmt['vrf']}", f" ip route 0.0.0.0/0 {mgmt['gateway']}"])
+                        commands.extend([f"vrf context {mgmt['vrf']}", f"ip route 0.0.0.0/0 {mgmt['gateway']}"])
                 else:
                     commands.append(f"ip route 0.0.0.0 0.0.0.0 {mgmt['gateway']}")
-        banner = global_config.get('banner', {});
+        banner = global_config.get('banner', {})
         if banner.get('enabled') and banner.get('text'): commands.append(
             f"banner login ^{banner['text'].replace(chr(10), '^C')}^C")
-        archive = global_config.get('archive', {});
-        if archive.get('enabled'): cmd = "archive";
-        if archive.get('path'): cmd += f"\n path {archive['path']}";
-        if archive.get('max_files'): cmd += f"\n maximum {archive['max_files']}";
-        if archive.get('time_period_enabled') and archive.get(
-            'time_period'): cmd += f"\n time-period {archive['time_period']}"; commands.append(cmd)
-        if commands: module = 'cisco.ios.ios_config' if 'IOS-XE' in os_type else 'cisco.nxos.nxos_config'; tasks.append(
-            {'name': 'Configure Global Settings', module: {'lines': commands}})
+        archive = global_config.get('archive', {})
+        if archive.get('enabled'):
+            commands.append("archive")
+            if archive.get('path'): commands.append(f" path {archive['path']}")
+            if archive.get('max_files'): commands.append(f" maximum {archive['max_files']}")
+            if archive.get('time_period_enabled') and archive.get('time_period'): commands.append(
+                f" time-period {archive['time_period']}")
+        if commands:
+            module = 'cisco.ios.ios_config' if 'IOS-XE' in os_type else 'cisco.nxos.nxos_config'
+            tasks.append({'name': 'Configure Global Settings', module: {'lines': commands}})
         return tasks
 
     def _generate_vlan_tasks(self, os_type: str, vlan_config: Dict[str, Any]) -> List[Dict[str, Any]]:
-        # ... (이전과 동일)
         tasks = [];
         commands = [];
         svi_commands = []
@@ -146,10 +147,7 @@ class ConfigManager:
             if not vlan.get('id'): continue
             vlan_id = vlan['id'];
             vlan_name = vlan.get('name', f"VLAN{vlan_id}")
-            if 'IOS-XE' in os_type:
-                commands.extend([f"vlan {vlan_id}", f" name {vlan_name}"])
-            elif 'NX-OS' in os_type:
-                commands.extend([f"vlan {vlan_id}", f"  name {vlan_name}"])
+            commands.extend([f"vlan {vlan_id}", f" name {vlan_name}"])
             svi_data = vlan.get('svi', {})
             if svi_data.get('enabled'):
                 svi_cmds_per_interface = [f"interface Vlan{vlan_id}"]
@@ -166,56 +164,43 @@ class ConfigManager:
                     group = fhrp_data['group'];
                     vip = fhrp_data['vip'];
                     priority = fhrp_data.get('priority')
-                    if 'IOS-XE' in os_type: svi_cmds_per_interface.append(f" vrrp {group} ip {vip}");
-                    if priority: svi_cmds_per_interface.append(f" vrrp {group} priority {priority}");
-                    if fhrp_data.get('preempt'):
-                        svi_cmds_per_interface.append(f" vrrp {group} preempt")
+                    if 'IOS-XE' in os_type:
+                        svi_cmds_per_interface.append(f" vrrp {group} ip {vip}")
+                        if priority: svi_cmds_per_interface.append(f" vrrp {group} priority {priority}")
+                        if fhrp_data.get('preempt'): svi_cmds_per_interface.append(f" vrrp {group} preempt")
                     elif 'NX-OS' in os_type:
-                        commands.append("feature hsrp"); svi_cmds_per_interface.append(
-                            " hsrp version 2"); svi_cmds_per_interface.append(
-                            f" hsrp {group}"); svi_cmds_per_interface.append(f"  ip {vip}");
-                    if priority: svi_cmds_per_interface.append(f"  priority {priority}");
-                    if fhrp_data.get('preempt'): svi_cmds_per_interface.append(f"  preempt")
+                        if 'hsrp' not in ' '.join(commands): commands.append("feature hsrp")
+                        svi_cmds_per_interface.extend([f" hsrp version 2", f" hsrp {group}", f"  ip {vip}"])
+                        if priority: svi_cmds_per_interface.append(f"  priority {priority}")
+                        if fhrp_data.get('preempt'): svi_cmds_per_interface.append("  preempt")
                 for helper in svi_data.get('dhcp_helpers', []): svi_cmds_per_interface.append(
                     f" ip helper-address {helper}")
                 svi_cmds_per_interface.append(" no shutdown");
                 svi_commands.extend(svi_cmds_per_interface)
-        if commands or svi_commands: final_commands = commands + svi_commands; module = 'cisco.ios.ios_config' if 'IOS-XE' in os_type else 'cisco.nxos.nxos_config'; tasks.append(
-            {'name': 'Configure VLANs and SVIs', module: {'lines': final_commands}})
+        if commands or svi_commands:
+            final_commands = commands + svi_commands
+            module = 'cisco.ios.ios_config' if 'IOS-XE' in os_type else 'cisco.nxos.nxos_config'
+            tasks.append({'name': 'Configure VLANs and SVIs', module: {'lines': final_commands}})
         return tasks
 
     def _generate_switching_tasks(self, os_type: str, switching_config: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """스위칭 관련 설정 태스크 생성 (VTP, MST, L2 Security 포함)"""
-        tasks = []
+        tasks = [];
         commands = []
-
-        # 1. VTP 설정
         vtp_config = switching_config.get('vtp', {})
         if vtp_config.get('enabled') and vtp_config.get('domain'):
-            if 'IOS-XE' in os_type:  # NX-OS는 VTPv3만 지원하며 구문이 다름
-                commands.append(f"vtp mode {vtp_config.get('mode', 'transparent')}")
-                commands.append(f"vtp domain {vtp_config['domain']}")
-                if vtp_config.get('password'):
-                    commands.append(f"vtp password {vtp_config['password']}")
-                if vtp_config.get('version'):
-                    commands.append(f"vtp version {vtp_config['version']}")
-
-        # 2. STP 설정
+            if 'IOS-XE' in os_type:
+                commands.extend(
+                    [f"vtp mode {vtp_config.get('mode', 'transparent')}", f"vtp domain {vtp_config['domain']}"])
+                if vtp_config.get('password'): commands.append(f"vtp password {vtp_config['password']}")
+                if vtp_config.get('version'): commands.append(f"vtp version {vtp_config['version']}")
         stp_mode = switching_config.get('stp_mode')
-        if stp_mode:
-            commands.append(f"spanning-tree mode {stp_mode}")
-        if switching_config.get('stp_priority'):
-            commands.append(f"spanning-tree vlan 1-4094 priority {switching_config['stp_priority']}")
-        if switching_config.get('stp_portfast_default'):
-            commands.append("spanning-tree portfast default")
-        if switching_config.get('stp_bpduguard_default'):
-            commands.append("spanning-tree portfast bpduguard default")
-        if switching_config.get('stp_bpdufilter_default'):
-            commands.append("spanning-tree portfast bpdufilter default")
-        if switching_config.get('stp_loopguard_default'):
-            commands.append("spanning-tree loopguard default")
-
-        # 2a. MST 상세 설정
+        if stp_mode: commands.append(f"spanning-tree mode {stp_mode}")
+        if switching_config.get('stp_priority'): commands.append(
+            f"spanning-tree vlan 1-4094 priority {switching_config['stp_priority']}")
+        if switching_config.get('stp_portfast_default'): commands.append("spanning-tree portfast default")
+        if switching_config.get('stp_bpduguard_default'): commands.append("spanning-tree portfast bpduguard default")
+        if switching_config.get('stp_bpdufilter_default'): commands.append("spanning-tree portfast bpdufilter default")
+        if switching_config.get('stp_loopguard_default'): commands.append("spanning-tree loopguard default")
         if stp_mode == 'mst':
             mst_config = switching_config.get('mst', {})
             if mst_config.get('name') and mst_config.get('revision'):
@@ -223,110 +208,97 @@ class ConfigManager:
                 commands.append(f" name {mst_config['name']}")
                 commands.append(f" revision {mst_config['revision']}")
                 for inst in mst_config.get('instances', []):
-                    if inst.get('id') and inst.get('vlans'):
-                        commands.append(f" instance {inst['id']} vlan {inst['vlans']}")
-                commands.append("exit")
-
-        # 3. L2 보안 설정
+                    if inst.get('id') and inst.get('vlans'): commands.append(
+                        f" instance {inst['id']} vlan {inst['vlans']}")
         l2_sec = switching_config.get('l2_security', {})
         if l2_sec.get('dhcp_snooping_enabled'):
             if 'IOS-XE' in os_type:
                 commands.append("ip dhcp snooping")
-                if l2_sec.get('dhcp_snooping_vlans'):
-                    commands.append(f"ip dhcp snooping vlan {l2_sec['dhcp_snooping_vlans']}")
+                if l2_sec.get('dhcp_snooping_vlans'): commands.append(
+                    f"ip dhcp snooping vlan {l2_sec['dhcp_snooping_vlans']}")
             elif 'NX-OS' in os_type:
                 commands.append("feature dhcp snooping")
-
         if l2_sec.get('dai_vlans'):
             if 'IOS-XE' in os_type:
                 commands.append(f"ip arp inspection vlan {l2_sec['dai_vlans']}")
             elif 'NX-OS' in os_type:
                 commands.append("feature arp-inspection")
-
         if commands:
             module = 'cisco.ios.ios_config' if 'IOS-XE' in os_type else 'cisco.nxos.nxos_config'
-            tasks.append({
-                'name': 'Configure Advanced Switching Settings',
-                module: {
-                    'lines': commands
-                }
-            })
+            tasks.append({'name': 'Configure Advanced Switching Settings', module: {'lines': commands}})
         return tasks
 
     def _generate_interface_tasks(self, os_type: str, interface_configs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         tasks = []
-        if not interface_configs:
-            return tasks
+        if not interface_configs: return tasks
         parents_list = []
         for config in interface_configs:
             if not config.get('is_port_channel'): continue
             lines = []
             if config.get('description'): lines.append(f"description {config['description']}")
-            if config.get('shutdown'):
-                lines.append("shutdown")
-            else:
-                lines.append("no shutdown")
+            lines.append("shutdown" if config.get('shutdown') else "no shutdown")
             mode = config.get('mode', '')
-            if mode == "L2 Access": lines.append("switchport mode access");
-            if config['access'].get('vlan'): lines.append(f"switchport access vlan {config['access']['vlan']}")
-            if config['access'].get('voice_vlan'):
-                lines.append(f"switchport voice vlan {config['access']['voice_vlan']}")
+            if mode == "L2 Access":
+                lines.extend(["switchport", f"switchport mode access"])
+                if config['access'].get('vlan'): lines.append(f"switchport access vlan {config['access']['vlan']}")
+                if config['access'].get('voice_vlan'): lines.append(
+                    f"switchport voice vlan {config['access']['voice_vlan']}")
             elif mode == "L2 Trunk":
-                lines.append("switchport");
-            if 'IOS-XE' in os_type: lines.append("switchport trunk encapsulation dot1q"); lines.append(
-                "switchport mode trunk");
-            if config['trunk'].get('native_vlan'): lines.append(
-                f"switchport trunk native vlan {config['trunk']['native_vlan']}")
-            if config['trunk'].get('allowed_vlans'):
-                lines.append(f"switchport trunk allowed vlan {config['trunk']['allowed_vlans']}")
+                lines.append("switchport")
+                if 'IOS-XE' in os_type: lines.append("switchport trunk encapsulation dot1q")
+                lines.append("switchport mode trunk")
+                if config['trunk'].get('native_vlan'): lines.append(
+                    f"switchport trunk native vlan {config['trunk']['native_vlan']}")
+                if config['trunk'].get('allowed_vlans'): lines.append(
+                    f"switchport trunk allowed vlan {config['trunk']['allowed_vlans']}")
             elif mode == "L3 Routed":
-                lines.append("no switchport");
-            if config['routed'].get('ip'): ip, prefix = config['routed']['ip'].split(
-                '/'); netmask = self._prefix_to_netmask(int(prefix)); lines.append(f"ip address {ip} {netmask}")
+                lines.append("no switchport")
+                if config['routed'].get('ip'):
+                    ip, prefix = config['routed']['ip'].split('/');
+                    netmask = self._prefix_to_netmask(int(prefix))
+                    lines.append(f"ip address {ip} {netmask}")
             parents_list.append({'parents': f"interface {config['name']}", 'lines': lines})
         for config in interface_configs:
             if config.get('is_port_channel'): continue
             lines = []
             if config.get('description'): lines.append(f"description {config['description']}")
-            if config.get('shutdown'):
-                lines.append("shutdown")
-            else:
-                lines.append("no shutdown")
+            lines.append("shutdown" if config.get('shutdown') else "no shutdown")
             mode = config.get('mode', '')
-            if mode == "L2 Access" or mode == "L2 Trunk":
+            if "L2" in mode:
                 lines.append("switchport")
                 if 'IOS-XE' in os_type and mode == "L2 Trunk": lines.append("switchport trunk encapsulation dot1q")
-                if mode == "L2 Access": lines.append("switchport mode access");
-                if config['access'].get('vlan'): lines.append(f"switchport access vlan {config['access']['vlan']}")
-                if config['access'].get('voice_vlan'):
-                    lines.append(f"switchport voice vlan {config['access']['voice_vlan']}")
-                else:
-                    lines.append("switchport mode trunk");
-                if config['trunk'].get('native_vlan'): lines.append(
-                    f"switchport trunk native vlan {config['trunk']['native_vlan']}")
-                if config['trunk'].get('allowed_vlans'): lines.append(
-                    f"switchport trunk allowed vlan {config['trunk']['allowed_vlans']}")
+                if mode == "L2 Access":
+                    lines.append("switchport mode access")
+                    if config['access'].get('vlan'): lines.append(f"switchport access vlan {config['access']['vlan']}")
+                    if config['access'].get('voice_vlan'): lines.append(
+                        f"switchport voice vlan {config['access']['voice_vlan']}")
+                else:  # L2 Trunk
+                    lines.append("switchport mode trunk")
+                    if config['trunk'].get('native_vlan'): lines.append(
+                        f"switchport trunk native vlan {config['trunk']['native_vlan']}")
+                    if config['trunk'].get('allowed_vlans'): lines.append(
+                        f"switchport trunk allowed vlan {config['trunk']['allowed_vlans']}")
                 if config['stp'].get('portfast'): lines.append("spanning-tree portfast")
                 if config['stp'].get('bpduguard'): lines.append("spanning-tree bpduguard enable")
-                ps = config.get('port_security', {});
-                if ps.get('enabled'): lines.append("switchport port-security");
-                if ps.get('max_mac'): lines.append(f"switchport port-security maximum {ps['max_mac']}");
-                if ps.get('violation'): lines.append(f"switchport port-security violation {ps['violation']}")
-                sc = config.get('storm_control', {});
+                ps = config.get('port_security', {})
+                if ps.get('enabled'):
+                    lines.extend(
+                        [f"switchport port-security", f"switchport port-security maximum {ps.get('max_mac', '1')}",
+                         f"switchport port-security violation {ps.get('violation', 'shutdown')}"])
+                sc = config.get('storm_control', {})
                 if sc.get('broadcast'): lines.append(f"storm-control broadcast level {sc['broadcast']}")
                 if sc.get('multicast'): lines.append(f"storm-control multicast level {sc['multicast']}")
                 if sc.get('unicast'): lines.append(f"storm-control unicast level {sc['unicast']}")
-                if sc.get('broadcast') or sc.get('multicast') or sc.get('unicast'): lines.append(
+                if any([sc.get('broadcast'), sc.get('multicast'), sc.get('unicast')]): lines.append(
                     f"storm-control action {sc.get('action', 'shutdown')}")
             elif mode == "L3 Routed":
-                lines.append("no switchport");
-            if config['routed'].get('ip'):
-                ip, prefix = config['routed']['ip'].split('/'); netmask = self._prefix_to_netmask(
-                    int(prefix)); lines.append(f"ip address {ip} {netmask}")
+                lines.append("no switchport")
+                if config['routed'].get('ip'): ip, prefix = config['routed']['ip'].split(
+                    '/'); netmask = self._prefix_to_netmask(int(prefix)); lines.append(f"ip address {ip} {netmask}")
             elif mode == "Port-Channel Member":
-                pc = config.get('pc_member', {});
-            if pc.get('group_id'): lines.append(f"channel-group {pc['group_id']} mode {pc.get('mode', 'active')}")
-            udld = config.get('udld', {});
+                pc = config.get('pc_member', {})
+                if pc.get('group_id'): lines.append(f"channel-group {pc['group_id']} mode {pc.get('mode', 'active')}")
+            udld = config.get('udld', {})
             if udld.get('enabled') and config.get('type') == 'Fiber': lines.append(
                 f"udld port {udld.get('mode', 'normal')}")
             parents_list.append({'parents': f"interface {config['name']}", 'lines': lines})
@@ -337,16 +309,67 @@ class ConfigManager:
                  'loop': parents_list})
         return tasks
 
+    def _generate_routing_tasks(self, os_type: str, routing_config: Dict[str, Any]) -> List[Dict[str, Any]]:
+        tasks = [];
+        commands = []
+        for route in routing_config.get('static_routes', []):
+            if route.get('prefix') and route.get('nexthop'):
+                parts = route['prefix'].split('/');
+                prefix, mask = parts[0], self._prefix_to_netmask(int(parts[1]))
+                cmd = "ip route"
+                if route.get('vrf'): cmd += f" vrf {route['vrf']}"
+                cmd += f" {prefix} {mask} {route['nexthop']}"
+                if route.get('metric'): cmd += f" {route['metric']}"
+                commands.append(cmd)
+        ospf = routing_config.get('ospf', {})
+        if ospf.get('enabled') and ospf.get('process_id'):
+            if 'NX-OS' in os_type: commands.append("feature ospf")
+            commands.append(f"router ospf {ospf['process_id']}")
+            if ospf.get('router_id'): commands.append(f" router-id {ospf['router_id']}")
+            for net in ospf.get('networks', []):
+                if net.get('prefix') and net.get('wildcard') and net.get('area'): commands.append(
+                    f" network {net['prefix']} {net['wildcard']} area {net['area']}")
+        eigrp = routing_config.get('eigrp', {})
+        if eigrp.get('enabled') and eigrp.get('as_number'):
+            if 'NX-OS' in os_type: commands.append("feature eigrp")
+            commands.append(f"router eigrp {eigrp['as_number']}")
+            if eigrp.get('router_id') and 'IOS-XE' in os_type: commands.append(f" eigrp router-id {eigrp['router_id']}")
+            for net in eigrp.get('networks', []):
+                if net.get('prefix'):
+                    cmd = f" network {net['prefix']}"
+                    if net.get('wildcard'): cmd += f" {net['wildcard']}"
+                    commands.append(cmd)
+        bgp = routing_config.get('bgp', {})
+        if bgp.get('enabled') and bgp.get('as_number'):
+            if 'NX-OS' in os_type: commands.append("feature bgp")
+            commands.append(f"router bgp {bgp['as_number']}")
+            if bgp.get('router_id'): commands.append(f" bgp router-id {bgp['router_id']}")
+            for neighbor in bgp.get('neighbors', []):
+                if neighbor.get('ip') and neighbor.get('remote_as'):
+                    commands.append(f" neighbor {neighbor['ip']} remote-as {neighbor['remote_as']}")
+                    if neighbor.get('description'): commands.append(
+                        f" neighbor {neighbor['ip']} description {neighbor['description']}")
+                    if neighbor.get('update_source'): commands.append(
+                        f" neighbor {neighbor['ip']} update-source {neighbor['update_source']}")
+                    if neighbor.get('rmap_in'): commands.append(
+                        f" neighbor {neighbor['ip']} route-map {neighbor['rmap_in']} in")
+                    if neighbor.get('rmap_out'): commands.append(
+                        f" neighbor {neighbor['ip']} route-map {neighbor['rmap_out']} out")
+            for net in bgp.get('networks', []): commands.append(f" network {net}")
+        if commands:
+            module = 'cisco.ios.ios_config' if 'IOS-XE' in os_type else 'cisco.nxos.nxos_config'
+            tasks.append({'name': 'Configure Routing Protocols', module: {'lines': commands}})
+        return tasks
+
     def _generate_ha_tasks(self, os_type: str, ha_config: Dict[str, Any]) -> List[Dict[str, Any]]:
-        # ... (이전과 동일)
         tasks = [];
         commands = []
         if 'IOS-XE' in os_type:
             svl_config = ha_config.get('svl', {})
-            if svl_config.get('enabled') and svl_config.get('domain'): commands.append(
-                "stackwise-virtual"); commands.append(f" domain {svl_config['domain']}");
-            if commands: tasks.append(
-                {'name': 'Configure StackWise Virtual (IOS-XE)', 'cisco.ios.ios_config': {'lines': commands}})
+            if svl_config.get('enabled') and svl_config.get('domain'):
+                commands.extend([f"stackwise-virtual", f" domain {svl_config['domain']}"])
+                if commands: tasks.append(
+                    {'name': 'Configure StackWise Virtual (IOS-XE)', 'cisco.ios.ios_config': {'lines': commands}})
         elif 'NX-OS' in os_type:
             vpc_config = ha_config.get('vpc', {})
             if vpc_config.get('enabled') and vpc_config.get('domain'):
@@ -359,9 +382,8 @@ class ConfigManager:
         return tasks
 
     def _generate_security_tasks(self, os_type: str, security_config: Dict[str, Any]) -> List[Dict[str, Any]]:
-        # ... (이전과 동일)
         tasks = [];
-        commands = [];
+        commands = []
         module = 'cisco.ios.ios_config' if 'IOS-XE' in os_type else 'cisco.nxos.nxos_config'
         for user in security_config.get('local_users', []):
             if user.get('username') and user.get('password'): commands.append(
@@ -372,46 +394,46 @@ class ConfigManager:
         if security_config.get('aaa_auth_exec'): commands.append(
             f"aaa authorization exec {security_config['aaa_auth_exec']}")
         for group in security_config.get('aaa_groups', []):
-            if group.get('group_name') and group.get('servers'): commands.append(
-                f"aaa group server {group.get('type', 'tacacs+')} {group['group_name']}");
-            for server in group['servers']: commands.append(
-                f" server-private {server}" if 'IOS-XE' in os_type and group.get(
-                    'type') == 'tacacs+' else f" server {server}")
-        line_conf = security_config.get('line_config', {});
-        if line_conf: commands.append("line con 0");
-        if line_conf.get('con_timeout'): commands.append(f" exec-timeout {line_conf['con_timeout']}");
-        if line_conf.get('con_logging_sync'): commands.append(" logging synchronous");
-        if line_conf.get('con_auth_aaa') and line_conf.get('con_auth_method'): commands.append(
-            f" login authentication {line_conf['con_auth_method']}"); vty_range = line_conf.get('vty_range',
-                                                                                                '0 4'); commands.append(
-            f"line vty {vty_range}");
-        if line_conf.get('vty_timeout'): commands.append(f" exec-timeout {line_conf['vty_timeout']}");
-        if line_conf.get('vty_transport'): commands.append(f" transport input {line_conf['vty_transport']}")
-        snmp = security_config.get('snmp', {});
+            if group.get('group_name') and group.get('servers'):
+                commands.append(f"aaa group server {group.get('type', 'tacacs+')} {group['group_name']}")
+                for server in group['servers']: commands.append(
+                    f" server-private {server}" if 'IOS-XE' in os_type and group.get(
+                        'type') == 'tacacs+' else f" server {server}")
+        line_conf = security_config.get('line_config', {})
+        if line_conf:
+            commands.append("line con 0")
+            if line_conf.get('con_timeout'): commands.append(f" exec-timeout {line_conf['con_timeout']}")
+            if line_conf.get('con_logging_sync'): commands.append(" logging synchronous")
+            if line_conf.get('con_auth_aaa') and line_conf.get('con_auth_method'): commands.append(
+                f" login authentication {line_conf['con_auth_method']}")
+            vty_range = line_conf.get('vty_range', '0 4')
+            commands.append(f"line vty {vty_range}")
+            if line_conf.get('vty_timeout'): commands.append(f" exec-timeout {line_conf['vty_timeout']}")
+            if line_conf.get('vty_transport'): commands.append(f" transport input {line_conf['vty_transport']}")
+        snmp = security_config.get('snmp', {})
         if snmp:
             if snmp.get('location'): commands.append(f"snmp-server location {snmp['location']}")
             if snmp.get('contact'): commands.append(f"snmp-server contact {snmp['contact']}")
             for comm in snmp.get('communities', []):
-                if comm.get(
-                    'community'): cmd = f"snmp-server community {comm['community']} {comm.get('permission', 'RO')}";
-                if comm.get('acl'): cmd += f" {comm['acl']}"; commands.append(cmd)
+                if comm.get('community'):
+                    cmd = f"snmp-server community {comm['community']} {comm.get('permission', 'RO')}"
+                    if comm.get('acl'): cmd += f" {comm['acl']}"
+                    commands.append(cmd)
             for user in snmp.get('v3_users', []):
-                if user.get('username') and user.get('group') and user.get('auth_proto') and user.get(
-                    'auth_pass'): commands.append(
-                    f"snmp-server group {user['group']} v3 auth"); cmd = f"snmp-server user {user['username']} {user['group']} v3 auth {user['auth_proto']} {user['auth_pass']}";
-                if user.get('priv_proto') and user.get(
-                    'priv_pass'): cmd += f" priv {user['priv_proto']} {user['priv_pass']}"; commands.append(cmd)
-        hardening = security_config.get('hardening', {});
+                if user.get('username') and user.get('group') and user.get('auth_proto') and user.get('auth_pass'):
+                    commands.append(f"snmp-server group {user['group']} v3 auth")
+                    cmd = f"snmp-server user {user['username']} {user['group']} v3 auth {user['auth_proto']} {user['auth_pass']}"
+                    if user.get('priv_proto') and user.get(
+                        'priv_pass'): cmd += f" priv {user['priv_proto']} {user['priv_pass']}"
+                    commands.append(cmd)
+        hardening = security_config.get('hardening', {})
         if hardening:
             if hardening.get('no_ip_http'): commands.extend(["no ip http server", "no ip http secure-server"])
             if hardening.get('no_cdp'): commands.append("no cdp run" if 'IOS-XE' in os_type else "no feature cdp")
             if hardening.get('lldp'): commands.append("lldp run" if 'IOS-XE' in os_type else "feature lldp")
-        if commands: tasks.append({'name': 'Configure Security Settings', module: {'lines': commands}})
+        if commands:
+            tasks.append({'name': 'Configure Security Settings', module: {'lines': commands}})
         return tasks
-
-    def _generate_routing_tasks(self, os_type: str, routing_config: Dict[str, Any]) -> List[Dict[str, Any]]:
-        return [{'name': 'Configure Routing (Placeholder)',
-                 'debug': {'msg': 'Routing configuration will be implemented here'}}]
 
     def export_playbook_to_yaml(self, playbook_data: Dict[str, Any]) -> str:
         return yaml.dump([playbook_data], default_flow_style=False, allow_unicode=True, indent=2)
