@@ -111,13 +111,15 @@ from ui.main_window import MainWindow
 ### 각 모듈의 import 패턴
 
 **UI 모듈에서 Core import:**
+
 ```python
 # ui/main_window.py
 import sys
 import os
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core.device_manager import CiscoCommandGenerator
+from core.device_manager_new import CiscoCommandGenerator
 from core.network_utils import CLIAnalyzer
 ```
 
