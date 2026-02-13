@@ -1,0 +1,154 @@
+services:
+  # ========================================
+  # PostgreSQL - Production Database
+  # ========================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: netmanager-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-netmanager}
+      POSTGRES_USER: ${POSTGRES_USER:-netmanager}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-netmanager123}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-netmanager}" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ========================================
+  # Redis - Message Broker for Celery
+  # ========================================
+  redis:
+    image: redis:7-alpine
+    container_name: netmanager-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ========================================
+  # Backend - FastAPI (uvicorn)
+  # ========================================
+  backend:
+    build:
+      context: ./Netmanager_Backend
+      dockerfile: Dockerfile
+    container_name: netmanager-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-netmanager}:${POSTGRES_PASSWORD:-netmanager123}@postgres:5432/${POSTGRES_DB:-netmanager}
+      - REDIS_URL=redis://redis:6379/0
+      - APP_ENV=${APP_ENV:-production}
+      - SECRET_KEY=${SECRET_KEY:-netmanager-secret-key-v2-forced-logout}
+      - FIELD_ENCRYPTION_KEY=${FIELD_ENCRYPTION_KEY:-}
+      - SYSLOG_QUEUE_SIZE=${SYSLOG_QUEUE_SIZE:-5000}
+      - SYSLOG_WORKERS=${SYSLOG_WORKERS:-4}
+      - SYSLOG_DROP_LOG_INTERVAL_SEC=${SYSLOG_DROP_LOG_INTERVAL_SEC:-5.0}
+      - SYSLOG_CELERY_QUEUE=${SYSLOG_CELERY_QUEUE:-syslog}
+    volumes:
+      - ./Netmanager_Backend/firmware_storage:/app/firmware_storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+  # ========================================
+  # Celery Worker - Background Tasks (SNMP/SSH)
+  # ========================================
+  celery-worker:
+    build:
+      context: ./Netmanager_Backend
+      dockerfile: Dockerfile
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-netmanager}:${POSTGRES_PASSWORD:-netmanager123}@postgres:5432/${POSTGRES_DB:-netmanager}
+      - REDIS_URL=redis://redis:6379/0
+      - APP_ENV=${APP_ENV:-production}
+      - SECRET_KEY=${SECRET_KEY:-netmanager-secret-key-v2-forced-logout}
+      - FIELD_ENCRYPTION_KEY=${FIELD_ENCRYPTION_KEY:-}
+      - CELERY_WORKER_CONCURRENCY=${CELERY_WORKER_CONCURRENCY:-4}
+      - CELERY_LOGLEVEL=${CELERY_LOGLEVEL:-info}
+      - CELERY_PREFETCH_MULTIPLIER=${CELERY_PREFETCH_MULTIPLIER:-1}
+      - CELERY_QUEUES=${CELERY_QUEUES:-default,discovery,ssh,monitoring,maintenance,syslog}
+      - CELERY_MAX_TASKS_PER_CHILD=${CELERY_MAX_TASKS_PER_CHILD:-200}
+      - CELERY_VISIBILITY_TIMEOUT=${CELERY_VISIBILITY_TIMEOUT:-3600}
+      - DISCOVERY_TASK_RATE_LIMIT=${DISCOVERY_TASK_RATE_LIMIT:-30/m}
+      - NEIGHBOR_CRAWL_RATE_LIMIT=${NEIGHBOR_CRAWL_RATE_LIMIT:-30/m}
+      - SSH_SYNC_TASK_RATE_LIMIT=${SSH_SYNC_TASK_RATE_LIMIT:-120/m}
+      - SYSLOG_TASK_RATE_LIMIT=${SYSLOG_TASK_RATE_LIMIT:-300/m}
+    volumes:
+      - ./Netmanager_Backend/firmware_storage:/app/firmware_storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    command: celery -A celery_app worker --loglevel=${CELERY_LOGLEVEL:-info} --concurrency=${CELERY_WORKER_CONCURRENCY:-4} --prefetch-multiplier=${CELERY_PREFETCH_MULTIPLIER:-1} --queues=${CELERY_QUEUES:-default,discovery,ssh,monitoring,maintenance,syslog}
+
+  # ========================================
+  # Celery Beat - Scheduled Tasks (Monitoring)
+  # ========================================
+  celery-beat:
+    build:
+      context: ./Netmanager_Backend
+      dockerfile: Dockerfile
+    container_name: netmanager-celery-beat
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-netmanager}:${POSTGRES_PASSWORD:-netmanager123}@postgres:5432/${POSTGRES_DB:-netmanager}
+      - REDIS_URL=redis://redis:6379/0
+      - APP_ENV=${APP_ENV:-production}
+      - SECRET_KEY=${SECRET_KEY:-netmanager-secret-key-v2-forced-logout}
+      - FIELD_ENCRYPTION_KEY=${FIELD_ENCRYPTION_KEY:-}
+      - CELERY_MAX_TASKS_PER_CHILD=${CELERY_MAX_TASKS_PER_CHILD:-200}
+      - CELERY_VISIBILITY_TIMEOUT=${CELERY_VISIBILITY_TIMEOUT:-3600}
+      - DISCOVERY_TASK_RATE_LIMIT=${DISCOVERY_TASK_RATE_LIMIT:-30/m}
+      - NEIGHBOR_CRAWL_RATE_LIMIT=${NEIGHBOR_CRAWL_RATE_LIMIT:-30/m}
+      - SSH_SYNC_TASK_RATE_LIMIT=${SSH_SYNC_TASK_RATE_LIMIT:-120/m}
+      - SYSLOG_TASK_RATE_LIMIT=${SYSLOG_TASK_RATE_LIMIT:-300/m}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    command: celery -A celery_app beat --loglevel=info
+
+  # ========================================
+  # Frontend - React (Nginx with HTTPS)
+  # ========================================
+  frontend:
+    build:
+      context: ./netmanager-frontend
+      dockerfile: Dockerfile
+    container_name: netmanager-frontend
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      # SSL Certificates (mount your certs here for HTTPS)
+      - ./certs:/etc/nginx/certs:ro
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+# ========================================
+# Volumes
+# ========================================
+volumes:
+  postgres_data:
+  redis_data:

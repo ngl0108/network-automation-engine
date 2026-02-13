@@ -1,0 +1,116 @@
+services:
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    container_name: netmanager-prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      - backend
+      - redis
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: netmanager-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+      - GF_SECURITY_ALLOW_EMBEDDING=true
+      - GF_SERVER_ROOT_URL=http://localhost/grafana/
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+      - loki
+    restart: unless-stopped
+
+  loki:
+    image: grafana/loki:2.9.8
+    container_name: netmanager-loki
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/config.yml
+    volumes:
+      - ./observability/loki/loki-config.yml:/etc/loki/config.yml:ro
+      - loki_data:/loki
+    restart: unless-stopped
+
+  promtail:
+    image: grafana/promtail:2.9.8
+    container_name: netmanager-promtail
+    command: -config.file=/etc/promtail/config.yml
+    volumes:
+      - ./observability/promtail/promtail-config.yml:/etc/promtail/config.yml:ro
+      - netmanager_logs:/var/log/netmanager:ro
+    depends_on:
+      - loki
+    restart: unless-stopped
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.66.0
+    container_name: netmanager-redis-exporter
+    ports:
+      - "9121:9121"
+    environment:
+      - REDIS_ADDR=redis://redis:6379
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  celery-exporter:
+    image: danihodovic/celery-exporter:0.12.2
+    container_name: netmanager-celery-exporter
+    ports:
+      - "9808:9808"
+    environment:
+      - CE_BROKER_URL=redis://redis:6379/0
+      - CE_RETRY_INTERVAL=5
+      - CE_BUCKETS=1,2.5,5,10,30,60,300,600,900,1800
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  backend:
+    environment:
+      - LOG_TO_FILE=1
+      - LOG_DIR=/var/log/netmanager
+      - LOG_FILE=/var/log/netmanager/backend.log
+    volumes:
+      - netmanager_logs:/var/log/netmanager
+
+  celery-worker:
+    environment:
+      - LOG_TO_FILE=1
+      - LOG_DIR=/var/log/netmanager
+      - LOG_FILE=/var/log/netmanager/celery-worker.log
+    volumes:
+      - netmanager_logs:/var/log/netmanager
+
+  celery-beat:
+    environment:
+      - LOG_TO_FILE=1
+      - LOG_DIR=/var/log/netmanager
+      - LOG_FILE=/var/log/netmanager/celery-beat.log
+    volumes:
+      - netmanager_logs:/var/log/netmanager
+
+volumes:
+  prometheus_data:
+  grafana_data:
+  loki_data:
+  netmanager_logs:

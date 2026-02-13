@@ -1,0 +1,27 @@
+컨테이너화 및 오케스트레이션 (Docker & Kubernetes 도입)
+
+현재: Redis만 Docker를 사용하고, FastAPI와 Celery는 로컬에서 실행하는 구조입니다.
+
+개선: FastAPI 서버, Celery Worker, Celery Beat 서버를 각각의 컨테이너로 띄우는 docker-compose.yml을 작성하세요.
+
+심화: 이를 Kubernetes(Minikube 또는 EKS) 환경에 배포하기 위한 Helm Chart나 Kustomize Manifest(Deployment, Service, ConfigMap)를 작성해 보세요. 이 과정 자체가 완벽한 클라우드 네이티브 아키텍처 실습입니다.
+
+CI/CD 파이프라인 구축 (GitHub Actions)
+
+코드 푸시 시 자동으로 단위 테스트(Pytest)를 수행하고, Docker Image를 빌드하여 GitHub Container Registry(GHCR)나 Docker Hub에 푸시하는 파이프라인을 구축하세요.
+
+관측성(Observability) 확보 (Prometheus & Grafana)
+
+단순히 로그를 수집(/api/v1/logs/)하는 것을 넘어, FastAPI 애플리케이션의 메트릭(API 응답 시간, 호출 횟수)과 Celery 큐의 상태(대기 중인 작업 수 등)를 Prometheus로 수집되도록 설정하세요.
+
+수집한 데이터를 Grafana 대시보드로 시각화하면 SRE의 핵심 역량인 '모니터링 체계 구축'을 훌륭하게 증명할 수 있습니다.
+
+보안 및 설정 관리 (Secrets Management)
+
+현재: app/core/config.py에 SECRET_KEY가 하드코딩되어 있습니다.
+
+개선: 환경변수(.env)를 사용하도록 변경하고, 더 나아가 클라우드 환경이라면 AWS Secrets Manager나 HashiCorp Vault와 연동하여 안전하게 관리하는 구조를 고민해 보세요.
+
+IaC(Infrastructure as Code) 접목
+
+이 프로젝트를 AWS 등의 클라우드에 배포할 때, AWS VPC, EC2(혹은 EKS), RDS 등의 인프라를 Terraform 코드로 구성해 보세요.

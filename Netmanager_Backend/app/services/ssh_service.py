@@ -1,578 +1,553 @@
-import os
-import json
-import re
+from app.drivers.manager import DriverManager
+from jinja2 import Template
+from typing import Dict, Any, List
 import logging
-import traceback
-from datetime import datetime
-from typing import Dict, List, Optional, Any
-from dataclasses import dataclass
-from enum import Enum
 
-# 로깅 설정 (상세 디버깅)
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# 라이브러리 로드 시도
-try:
-    from netmiko import ConnectHandler
-
-    NETMIKO_AVAILABLE = True
-except ImportError as e:
-    NETMIKO_AVAILABLE = False
-    logger.error(f"Error importing netmiko: {e}")
-
-
-class ConnectionStatus(Enum):
-    DISCONNECTED = "disconnected"
-    CONNECTING = "connecting"
-    CONNECTED = "connected"
-    ERROR = "error"
-    BUSY = "busy"
-
-
-class DeviceType(Enum):
-    CISCO_IOS = "cisco_ios"
-    CISCO_IOSXE = "cisco_iosxe"
-    CISCO_NXOS = "cisco_nxos"
-    CISCO_ASA = "cisco_asa"
-    CISCO_IOS_TELNET = "cisco_ios_telnet"
-
-
-@dataclass
 class DeviceInfo:
-    name: str
-    host: str
-    username: str
-    password: str
-    device_type: str = "cisco_ios"
-    port: int = 22
-    enable_password: Optional[str] = None
-    timeout: int = 60
-
-    def to_dict(self) -> Dict:
-        return {
-            'name': self.name, 'host': self.host, 'username': self.username,
-            'device_type': self.device_type, 'port': self.port, 'timeout': self.timeout
-        }
-
-
-@dataclass
-class BackupInfo:
-    device_name: str
-    timestamp: str
-    config: str
-    file_path: str
-
-    def save(self):
-        os.makedirs(os.path.dirname(self.file_path), exist_ok=True)
-        with open(self.file_path, 'w', encoding='utf-8') as f:
-            f.write(self.config)
-        logger.info(f"Backup saved: {self.file_path}")
+    """
+    DTO for device connection information.
+    """
+    def __init__(self, host, username, password, secret=None, port=22, device_type='cisco_ios'):
+        self.host = host
+        self.username = username
+        self.password = password
+        self.secret = secret
+        self.port = port
+        self.device_type = device_type
 
 
 class DeviceConnection:
+    """
+    Service class handling device interactions via the Driver Manager.
+    Acts as a facade/adapter for the core logic to access the unified driver layer.
+    """
     def __init__(self, device_info: DeviceInfo):
         self.device_info = device_info
-        self.connection = None
-        self.status = ConnectionStatus.DISCONNECTED
         self.last_error = None
-        self.backup_dir = os.path.expanduser("~/.cisco_config_manager/backups")
+        
+        # Instantiate the creation of the appropriate driver via Factory
+        try:
+            self.driver = DriverManager.get_driver(
+                device_type=device_info.device_type,
+                hostname=device_info.host,
+                username=device_info.username,
+                password=device_info.password,
+                port=device_info.port,
+                secret=device_info.secret
+            )
+        except Exception as e:
+            logger.exception("Driver init error")
+            self.driver = None
+            self.last_error = str(e)
 
     def connect(self) -> bool:
-        if not NETMIKO_AVAILABLE:
-            self.last_error = "Netmiko library not installed"
-            self.status = ConnectionStatus.ERROR
+        if not self.driver:
             return False
-
-        self.status = ConnectionStatus.CONNECTING
         try:
-            device_dict = {
-                'device_type': self.device_info.device_type,
-                'host': self.device_info.host,
-                'username': self.device_info.username,
-                'password': self.device_info.password,
-                'port': self.device_info.port,
-                'timeout': self.device_info.timeout,
-                'global_delay_factor': 2
-            }
-            if self.device_info.enable_password:
-                device_dict['secret'] = self.device_info.enable_password
-
-            logger.info(f"Connecting to {self.device_info.host}...")
-            self.connection = ConnectHandler(**device_dict)
-            if self.device_info.enable_password:
-                self.connection.enable()
-
-            # [필수] 페이징 비활성화 (전체 출력 받기 위함)
-            self.connection.send_command("terminal length 0")
-
-            self.status = ConnectionStatus.CONNECTED
-            return True
+            logger.info("Connecting to device", extra={"device_id": None})
+            connected = self.driver.connect()
+            if connected:
+                logger.info("Connection established")
+            else:
+                logger.warning("Connection failed")
+            return connected
         except Exception as e:
-            self.last_error = f"Connection error: {str(e)}"
-            self.status = ConnectionStatus.ERROR
-            logger.error(self.last_error)
+            self.last_error = str(e)
+            logger.exception("Connection error")
             return False
 
     def disconnect(self):
-        if self.connection:
-            try:
-                self.connection.disconnect()
-            except:
-                pass
-            finally:
-                self.connection = None
-                self.status = ConnectionStatus.DISCONNECTED
+        if self.driver:
+            self.driver.disconnect()
 
-    def is_connected(self) -> bool:
-        return self.status == ConnectionStatus.CONNECTED and self.connection is not None
+    def send_config_set(self, commands: List[str]) -> str:
+        """
+        Wrapper for push_config to support legacy calls (like Netmiko's send_config_set).
+        Returns the output log string upon success, or raises an exception on failure.
+        """
+        if not self.driver:
+            raise ConnectionError("Driver not initialized")
 
-    def send_command(self, command: str) -> str:
-        if not self.is_connected(): raise ConnectionError("Not connected")
+        result = self.driver.push_config(commands)
+        
+        # Driver returns {'success': bool, 'output': str, 'error': str}
+        if isinstance(result, dict):
+            if not result.get('success', False):
+                raise Exception(result.get('error', 'Config Push Failed'))
+            return result.get('output', '')
+        
+        return str(result)
+
+    def deploy_config_template(self, template_str: str, context: Dict[str, Any]):
+        """
+        Renders Jinja2 template and delegates push to driver.
+        """
+        if not self.driver:
+            return {"success": False, "error": "Driver not initialized"}
+
         try:
-            self.status = ConnectionStatus.BUSY
-            output = self.connection.send_command(command, use_textfsm=False)
-            self.status = ConnectionStatus.CONNECTED
-            return output
+            # 1. Render Template
+            tm = Template(template_str)
+            rendered_config = tm.render(context)
+            config_lines = [line.strip() for line in rendered_config.split('\n') if line.strip()]
+
+            # 2. Push via Driver
+            return self.driver.push_config(config_lines)
         except Exception as e:
-            self.last_error = str(e)
-            raise
+            logger.exception("Deploy error")
+            return {"success": False, "error": str(e)}
 
-    def send_config_commands(self, commands: List[str]) -> str:
-        if not self.is_connected(): raise ConnectionError("Not connected")
-        try:
-            self.status = ConnectionStatus.BUSY
-            output = self.connection.send_config_set(commands)
-            self.status = ConnectionStatus.CONNECTED
-            return output
-        except Exception as e:
-            self.last_error = str(e)
-            raise
+    def get_facts(self):
+        if not self.driver:
+            return {}
+        return self.driver.get_facts()
 
-    def get_running_config(self) -> str:
-        return self.send_command("show running-config")
+    def get_running_config(self):
+        if not self.driver:
+            raise ConnectionError("Driver not initialized")
+        return self.driver.get_config("running")
 
-    def backup_config(self, backup_type: str = "running") -> Optional[BackupInfo]:
-        try:
-            config = self.get_running_config()
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            file_name = f"{self.device_info.name}_{backup_type}_{timestamp}.cfg"
-            file_path = os.path.join(self.backup_dir, self.device_info.name, file_name)
-            backup = BackupInfo(self.device_info.name, timestamp, config, file_path)
-            backup.save()
-            return backup
-        except Exception as e:
-            logger.error(f"Backup failed: {e}")
-            return None
+    def get_interface_statuses(self):
+        """
+        Returns simple status dict {interface_name: status} for backward compatibility.
+        """
+        if not self.driver:
+            return {}
+        
+        interfaces = self.driver.get_interfaces()
+        result = {}
+        for intf in interfaces:
+            # Simple mapping: 'up' if enabled (and ideally operative up), but config only knows 'is_enabled' (no shutdown).
+            # If driver implements live status check later, this logic will improve automatically.
+            status = 'up' if intf.get('is_enabled', False) else 'admin_down'
+            result[intf['name']] = status
+        return result
+
+    def rollback(self) -> bool:
+        if not self.driver:
+            raise ConnectionError("Driver not initialized")
+        if hasattr(self.driver, "rollback"):
+            return bool(self.driver.rollback())
+        raise NotImplementedError("Rollback not supported by this driver")
+
+    def get_neighbors(self):
+        if not self.driver:
+            return []
+        return self.driver.get_neighbors()
+
+    def get_detailed_interfaces(self):
+        """
+        Returns full interface details list from driver.
+        """
+        if not self.driver:
+            return []
+        return self.driver.get_interfaces()
+
+    def send_command(self, command: str, use_textfsm: bool = False, **kwargs) -> str:
+        if not self.driver or not getattr(self.driver, "connection", None):
+            raise ConnectionError("Not connected")
+        return self.driver.connection.send_command(command, use_textfsm=use_textfsm, **kwargs)
+
+    def get_route_to(self, target_ip: str, vrf: str = None) -> Dict[str, Any]:
+        """
+        Best-effort route lookup for a given target IP.
+        Returns: {next_hop_ip, outgoing_interface, protocol, vrf, raw}
+        """
+        if not self.driver or not getattr(self.driver, "connection", None):
+            return {"next_hop_ip": None, "outgoing_interface": None, "protocol": None, "vrf": None, "raw": None}
+
+        if vrf:
+            cmd = f"show ip route vrf {vrf} {target_ip}"
+        else:
+            cmd = f"show ip route {target_ip}"
+
+        parsed = self.driver.connection.send_command(cmd, use_textfsm=True)
+        if isinstance(parsed, list) and parsed:
+            entry = parsed[0]
+            next_hop = entry.get("nexthop_ip") or entry.get("next_hop") or entry.get("nexthop") or entry.get("nexthopaddr")
+            out_intf = entry.get("interface") or entry.get("outgoing_interface") or entry.get("out_intf") or entry.get("exit_interface")
+            proto = entry.get("protocol") or entry.get("route_protocol")
+            vrf = entry.get("vrf") or entry.get("vrfname")
+            return {"next_hop_ip": next_hop, "outgoing_interface": out_intf, "protocol": proto, "vrf": vrf, "raw": None}
+
+        raw = parsed if isinstance(parsed, str) else self.driver.connection.send_command(cmd)
+        if vrf and ("Invalid input" in raw or "Unknown command" in raw):
+            cmd2 = f"show ip route {target_ip} vrf {vrf}"
+            raw = self.driver.connection.send_command(cmd2)
+        next_hop_ip = None
+        outgoing_interface = None
+        protocol = None
+
+        import re
 
 
-class ConnectionManager:
-    def __init__(self):
-        self.connections: Dict[str, DeviceConnection] = {}
-        self.device_list: List[DeviceInfo] = []
-        self.config_dir = os.path.expanduser("~/.cisco_config_manager")
-        self.devices_file = os.path.join(self.config_dir, "devices.json")
-        self._load_devices()
+        m = re.search(r"Known via \"([^\"]+)\"", raw)
+        if m:
+            protocol = m.group(1)
 
-    def _load_devices(self):
-        if os.path.exists(self.devices_file):
-            try:
-                with open(self.devices_file, 'r') as f:
-                    data = json.load(f)
-                    for d in data: self.device_list.append(DeviceInfo(**d))
-            except:
-                pass
+        m = re.search(r"via\s+(\d+\.\d+\.\d+\.\d+),\s*(\S+)", raw)
+        if m:
+            next_hop_ip = m.group(1)
+            outgoing_interface = m.group(2)
+        else:
+            m = re.search(r"directly connected,\s*(\S+)", raw)
+            if m:
+                outgoing_interface = m.group(1)
 
-    def save_devices(self):
-        os.makedirs(self.config_dir, exist_ok=True)
-        data = [d.to_dict() for d in self.device_list]
-        with open(self.devices_file, 'w') as f: json.dump(data, f, indent=2)
+        detected_vrf = vrf
+        m = re.search(r"Routing Table:\s+(\S+)", raw)
+        if m:
+            detected_vrf = m.group(1)
 
-    def add_device(self, info: DeviceInfo) -> bool:
-        if any(d.name == info.name for d in self.device_list): return False
-        self.device_list.append(info)
-        self.save_devices()
-        return True
+        return {"next_hop_ip": next_hop_ip, "outgoing_interface": outgoing_interface, "protocol": protocol, "vrf": detected_vrf, "raw": raw}
 
-    def remove_device(self, name: str) -> bool:
-        self.disconnect_device(name)
-        self.device_list = [d for d in self.device_list if d.name != name]
-        self.save_devices()
-        return True
+    def get_arp_entry(self, target_ip: str, vrf: str = None) -> Dict[str, Any]:
+        """
+        Best-effort ARP lookup for a given target IP.
+        Returns: {ip, mac, interface, raw}
+        """
+        if not self.driver or not getattr(self.driver, "connection", None):
+            return {"ip": target_ip, "mac": None, "interface": None, "raw": None}
 
-    def connect_device(self, name: str, password: str, enable: str = None) -> bool:
-        info = next((d for d in self.device_list if d.name == name), None)
-        if not info: return False
-        info.password = password
-        info.enable_password = enable
-        conn = DeviceConnection(info)
-        if conn.connect():
-            self.connections[name] = conn
-            return True
-        return False
+        if vrf:
+            cmd = f"show ip arp vrf {vrf} {target_ip}"
+        else:
+            cmd = f"show ip arp {target_ip}"
+        parsed = self.driver.connection.send_command(cmd, use_textfsm=True)
+        if isinstance(parsed, list) and parsed:
+            entry = parsed[0]
+            mac = entry.get("mac") or entry.get("hw_address") or entry.get("mac_address")
+            intf = entry.get("interface") or entry.get("intf")
+            ip = entry.get("address") or entry.get("ip") or target_ip
+            return {"ip": ip, "mac": mac, "interface": intf, "raw": None}
 
-    def disconnect_device(self, name: str):
-        if name in self.connections:
-            self.connections[name].disconnect()
-            del self.connections[name]
+        raw = parsed if isinstance(parsed, str) else self.driver.connection.send_command(cmd)
+        if vrf and ("Invalid input" in raw or "Unknown command" in raw):
+            cmd2 = f"show ip arp {target_ip} vrf {vrf}"
+            raw = self.driver.connection.send_command(cmd2)
+        import re
 
-    def get_connection(self, name: str) -> Optional[DeviceConnection]:
-        return self.connections.get(name)
+        mac = None
+        intf = None
+        m = re.search(r"(\d+\.\d+\.\d+\.\d+)\s+[\d\-]+\s+([0-9a-f\.]{10,})\s+\S+\s+(\S+)", raw, re.IGNORECASE)
+        if m:
+            mac = m.group(2)
+            intf = m.group(3)
+        return {"ip": target_ip, "mac": mac, "interface": intf, "raw": raw}
 
-    def is_connected(self, name: str) -> bool:
-        return name in self.connections and self.connections[name].is_connected()
+    def get_vrfs(self) -> List[str]:
+        if not self.driver or not getattr(self.driver, "connection", None):
+            return []
 
-    def disconnect_all(self):
-        for c in self.connections.values(): c.disconnect()
-        self.connections.clear()
+        cmds = ["show vrf", "show ip vrf"]
+        output = ""
+        for c in cmds:
+            out = self.driver.connection.send_command(c)
+            if out and "Invalid input" not in out and "Unknown command" not in out:
+                output = out
+                break
 
-    def get_device_status(self, name: str) -> Dict:
-        conn = self.connections.get(name)
-        if not conn: return {'connected': False, 'status': 'disconnected'}
-        return {
-            'connected': conn.is_connected(),
-            'status': conn.status.value,
-            'last_error': conn.last_error
-        }
+        if not output:
+            return []
 
-    def backup_all_devices(self) -> Dict:
-        results = {}
-        for name, conn in self.connections.items():
-            if conn.is_connected(): results[name] = conn.backup_config()
+        lines = [ln.strip() for ln in str(output).splitlines() if ln.strip()]
+        if not lines:
+            return []
+
+        vrfs = []
+        for ln in lines[1:]:
+            if ln.lower().startswith("name") or ln.lower().startswith("---"):
+                continue
+            parts = ln.split()
+            if not parts:
+                continue
+            name = parts[0].strip()
+            if name and name.lower() != "default":
+                vrfs.append(name)
+        return list(dict.fromkeys(vrfs))
+
+    def get_interface_vrf(self, interface_name: str) -> Dict[str, Any]:
+        if not self.driver or not getattr(self.driver, "connection", None):
+            return {"interface": interface_name, "vrf": None, "raw": None}
+
+        if not interface_name:
+            return {"interface": interface_name, "vrf": None, "raw": None}
+
+        cmds = [
+            f"show ip vrf interface {interface_name}",
+            f"show vrf interface {interface_name}",
+        ]
+        raw = ""
+        for c in cmds:
+            out = self.driver.connection.send_command(c)
+            if out and "Invalid input" not in out and "Unknown command" not in out:
+                raw = out
+                break
+
+        if not raw:
+            return {"interface": interface_name, "vrf": None, "raw": None}
+
+        import re
+
+        vrf = None
+        m = re.search(r"\bVRF\s+Name\s*:\s*(\S+)", raw, re.IGNORECASE)
+        if m:
+            vrf = m.group(1)
+        if not vrf:
+            m = re.search(r"\bis\s+in\s+VRF\s+(\S+)", raw, re.IGNORECASE)
+            if m:
+                vrf = m.group(1)
+        if not vrf:
+            m = re.search(r"\bvrf\s*[:=]\s*(\S+)", raw, re.IGNORECASE)
+            if m:
+                vrf = m.group(1)
+
+        if vrf and vrf.lower() == "default":
+            vrf = None
+
+        return {"interface": interface_name, "vrf": vrf, "raw": raw}
+
+    def get_mac_table_port(self, mac: str, vrf: str = None) -> Dict[str, Any]:
+        if not self.driver or not getattr(self.driver, "connection", None):
+            return {"mac": mac, "port": None, "vlan": None, "raw": None}
+
+        import re
+
+        def normalize(m: str) -> str:
+            s = (m or "").strip().lower()
+            s = re.sub(r"[^0-9a-f]", "", s)
+            if len(s) != 12:
+                return (m or "").strip()
+            return f"{s[0:4]}.{s[4:8]}.{s[8:12]}"
+
+        mac_n = normalize(mac)
+
+        cmds = [
+            f"show mac address-table address {mac_n}",
+            f"show mac address-table | include {mac_n}",
+            f"show mac address-table dynamic address {mac_n}",
+        ]
+        raw = ""
+        for c in cmds:
+            out = self.driver.connection.send_command(c)
+            if out and "Invalid input" not in out and "Unknown command" not in out:
+                raw = out
+                break
+
+        if not raw:
+            return {"mac": mac_n, "port": None, "vlan": None, "raw": None}
+
+        port = None
+        vlan = None
+        for ln in str(raw).splitlines():
+            line = ln.strip()
+            if not line:
+                continue
+            if line.lower().startswith("vlan") or line.lower().startswith("---"):
+                continue
+            m = re.search(r"^\s*(\d+)\s+([0-9a-f\.]{10,})\s+\S+\s+(\S+)\s*$", line, re.IGNORECASE)
+            if m:
+                vlan = m.group(1)
+                port = m.group(3)
+                break
+            m = re.search(r"\b(\d+)\b.*\b([0-9a-f\.]{10,})\b.*\b(dynamic|static)\b.*\b(\S+)\b", line, re.IGNORECASE)
+            if m:
+                vlan = m.group(1)
+                port = m.group(4)
+                break
+
+        return {"mac": mac_n, "port": port, "vlan": vlan, "raw": raw}
+
+    def get_mac_table(self) -> List[Dict[str, Any]]:
+        if not self.driver or not getattr(self.driver, "connection", None):
+            return []
+
+        cmds = [
+            "show mac address-table dynamic",
+            "show mac address-table",
+            "show mac-address-table",
+            "show bridge address-table",
+            "display mac-address",
+        ]
+        output = ""
+        parsed = None
+        for c in cmds:
+            out = self.driver.connection.send_command(c, use_textfsm=True)
+            if isinstance(out, list) and out:
+                parsed = out
+                output = ""
+                break
+            out2 = out if isinstance(out, str) else self.driver.connection.send_command(c)
+            if out2 and "Invalid input" not in out2 and "Unknown command" not in out2:
+                output = out2
+                break
+
+        results: List[Dict[str, Any]] = []
+        if isinstance(parsed, list) and parsed:
+            for e in parsed:
+                mac = e.get("mac") or e.get("mac_address") or e.get("destination_address")
+                vlan = e.get("vlan") or e.get("vlan_id")
+                port = e.get("destination_port") or e.get("port") or e.get("interface")
+                entry_type = e.get("type") or e.get("entry_type") or e.get("mac_type")
+                if mac and port:
+                    results.append({"mac": mac, "vlan": str(vlan) if vlan is not None else None, "port": port, "type": entry_type})
+            return results
+
+        if not output:
+            return []
+
+        import re
+
+        for ln in str(output).splitlines():
+            line = ln.strip()
+            if not line:
+                continue
+            if line.lower().startswith("vlan") or line.lower().startswith("---"):
+                continue
+            m = re.search(r"^\s*(\d+)\s+([0-9a-f\.:-]{11,})\s+(\S+)\s+(\S+)\s*$", line, re.IGNORECASE)
+            if m:
+                results.append({"vlan": m.group(1), "mac": m.group(2), "type": m.group(3), "port": m.group(4)})
+                continue
+            m = re.search(r"^\s*(\d+)\s+([0-9a-f\.:-]{11,})\s+(\S+)\s+(\S+)\s+(\S+)\s*$", line, re.IGNORECASE)
+            if m:
+                results.append({"vlan": m.group(1), "mac": m.group(2), "type": m.group(3), "port": m.group(5)})
+
         return results
 
+    def get_arp_table(self) -> List[Dict[str, Any]]:
+        if not self.driver or not getattr(self.driver, "connection", None):
+            return []
 
-# -----------------------------------------------------------------------------
-# [통합 파서] CLIAnalyzer: UI 탭 구조에 맞게 완벽 파싱 (FULL VERSION)
-# -----------------------------------------------------------------------------
-class CLIAnalyzer:
-    @staticmethod
-    def analyze_multiple_commands(outputs: Dict[str, str]) -> Dict[str, Any]:
-        """show run 결과와 show vlan 등 결과를 통합"""
-        print("[DEBUG] !!! FULL VERSION PARSER RUNNING !!!")
-        config = CLIAnalyzer.analyze_show_run(outputs.get('show run', ''))
+        cmds = ["show ip arp", "show arp", "display arp"]
+        results: List[Dict[str, Any]] = []
+        raw = ""
+        for cmd in cmds:
+            parsed = self.driver.connection.send_command(cmd, use_textfsm=True)
+            if isinstance(parsed, list) and parsed:
+                for e in parsed:
+                    ip = e.get("address") or e.get("ip") or e.get("protocol_address")
+                    mac = e.get("mac") or e.get("hw_address") or e.get("mac_address") or e.get("hardware_address")
+                    intf = e.get("interface") or e.get("intf")
+                    if ip and mac:
+                        results.append({"ip": ip, "mac": mac, "interface": intf})
+                if results:
+                    return results
+            raw = parsed if isinstance(parsed, str) else self.driver.connection.send_command(cmd)
+            if raw and "Invalid input" not in raw and "Unknown command" not in raw:
+                break
 
-        if 'show vlan' in outputs:
-            vlan_list = CLIAnalyzer._parse_show_vlan_brief(outputs['show vlan'])
-            existing_ids = {v['id'] for v in config['vlans']['list']}
-            for v in vlan_list:
-                if v['id'] not in existing_ids:
-                    config['vlans']['list'].append(v)
+        if not raw:
+            return results
 
-        print(f"[DEBUG] Final Parsed Keys: {list(config.keys())}")
-        return config
+        import re
 
-    @staticmethod
-    def analyze_show_run(cli_output: str) -> Dict[str, Any]:
-        """show run 정밀 파싱"""
-        # [초기화] UI 탭들이 기대하는 모든 키 구조 생성 (KeyError 방지)
-        analysis = {
-            'global': {
-                'hostname': '', 'domain_name': '', 'service_timestamps': False,
-                'service_password_encryption': False, 'service_call_home': False,
-                'dns_servers': [], 'ntp_servers': [], 'logging': {'hosts': []},
-                'management': {}, 'banner': {}, 'archive': {}, 'clock': {'timezone': '', 'summer_time': False}
-            },
-            'interfaces': [],
-            'vlans': {'list': [], 'ip_routing': False},
-            'routing': {'static_routes': [], 'ospf': {}, 'bgp': {}, 'eigrp': {}, 'rip': {}},
-            'switching': {'stp': {}, 'vtp': {}, 'l2_security': {}, 'mac_table': {}},
-            'security': {
-                'aaa': {'new_model': False}, 'users': [], 'line_console': {}, 'line_vty': {},
-                'snmp': {'communities': []}, 'hardening': {}, 'tcp': {}
-            },
-            'acls': [],
-            'ha': {'fhrp': {}, 'glbp': {}, 'svl': {}, 'vpc': {}, 'tracking': {}}
-        }
+        for ln in str(raw).splitlines():
+            line = ln.strip()
+            if not line or line.lower().startswith("protocol"):
+                continue
+            m = re.search(r"(\d+\.\d+\.\d+\.\d+)\s+\d+\s+([0-9a-f\.:-]{11,})\s+\S+\s+(\S+)", line, re.IGNORECASE)
+            if m:
+                results.append({"ip": m.group(1), "mac": m.group(2), "interface": m.group(3)})
+        return results
 
-        lines = cli_output.split('\n')
+    def get_dhcp_snooping_bindings(self) -> List[Dict[str, Any]]:
+        if not self.driver or not getattr(self.driver, "connection", None):
+            return []
 
-        # --- 1. Global & Basic ---
-        analysis['global']['hostname'] = CLIAnalyzer._extract_regex(lines, r'^hostname\s+(\S+)')
-        analysis['global']['domain_name'] = CLIAnalyzer._extract_regex(lines, r'^ip domain name\s+(\S+)')
-        analysis['global']['service_timestamps'] = 'service timestamps' in cli_output
-        analysis['global']['service_password_encryption'] = 'service password-encryption' in cli_output
-        analysis['global']['service_call_home'] = 'service call-home' in cli_output
-        analysis['vlans']['ip_routing'] = 'ip routing' in cli_output
+        cmds = ["show ip dhcp snooping binding", "show dhcp snooping binding", "display dhcp snooping binding"]
+        raw = ""
+        for cmd in cmds:
+            try:
+                raw = self.driver.connection.send_command(cmd)
+            except Exception:
+                raw = ""
+            if raw and "Invalid input" not in raw and "Unknown command" not in raw:
+                break
+        if not raw:
+            return []
 
-        # Clock
-        clock_line = CLIAnalyzer._extract_regex(lines, r'^clock timezone\s+(.+)')
-        if clock_line:
-            analysis['global']['clock']['timezone'] = clock_line
+        import re
 
-        # DNS / NTP / Logging / Banner / Archive
-        for line in lines:
-            line = line.strip()
-            if line.startswith('ip name-server'):
-                parts = line.split()
-                for part in parts[2:]:
-                    analysis['global']['dns_servers'].append({'ip': part, 'vrf': ''})
-            elif line.startswith('ntp server'):
-                parts = line.split()
-                if len(parts) >= 3:
-                    is_prefer = 'prefer' in line
-                    analysis['global']['ntp_servers'].append({'server': parts[2], 'prefer': is_prefer, 'vrf': ''})
-            elif line.startswith('logging host'):
-                parts = line.split()
-                if len(parts) >= 3:
-                    vrf = ''
-                    if 'vrf' in line:
-                        try:
-                            vrf = parts[parts.index('vrf') + 1]
-                        except:
-                            pass
-                    analysis['global']['logging']['hosts'].append({'ip': parts[2], 'vrf': vrf})
-            elif line.startswith('banner motd') or line.startswith('banner login'):
-                analysis['global']['banner']['enabled'] = True
-                analysis['global']['banner']['text'] = line
-            elif line.startswith('archive'):
-                analysis['global']['archive']['enabled'] = True
+        results: List[Dict[str, Any]] = []
+        for ln in str(raw).splitlines():
+            line = ln.strip()
+            if not line:
+                continue
+            if line.lower().startswith("macaddress") or line.lower().startswith("---"):
+                continue
+            m = re.search(
+                r"^\s*([0-9a-f\.:-]{11,})\s+(\d+\.\d+\.\d+\.\d+)\s+\S+\s+(\d+)\s+(\S+)",
+                line,
+                re.IGNORECASE,
+            )
+            if m:
+                results.append({"mac": m.group(1), "ip": m.group(2), "vlan": m.group(3), "interface": m.group(4)})
+        return results
 
-        # --- 2. Interfaces ---
-        interface_blocks = CLIAnalyzer._extract_blocks(lines, r'^interface\s+')
-        analysis['interfaces'] = CLIAnalyzer._parse_interfaces(interface_blocks)
+    def get_lldp_neighbors_detail(self) -> List[Dict[str, Any]]:
+        if not self.driver or not getattr(self.driver, "connection", None):
+            return []
 
-        # --- 3. Switching ---
-        stp_mode = CLIAnalyzer._extract_regex(lines, r'^spanning-tree mode\s+(\S+)')
-        analysis['switching']['stp'] = {'mode': stp_mode or 'pvst'}
+        cmds = [
+            "show lldp neighbors detail",
+            "show lldp neighbors",
+            "show lldp neighbor detail",
+            "display lldp neighbor",
+            "display lldp neighbors",
+        ]
+        raw = ""
+        for cmd in cmds:
+            try:
+                raw = self.driver.connection.send_command(cmd)
+            except Exception:
+                raw = ""
+            if raw and "Invalid input" not in raw and "Unknown command" not in raw:
+                break
+        if not raw:
+            return []
 
-        vtp_ver = CLIAnalyzer._extract_regex(lines, r'^vtp version\s+(\d+)')
-        analysis['switching']['vtp'] = {'version': vtp_ver, 'mode': 'transparent'}
-
-        # --- 4. Security ---
-        analysis['security']['aaa']['new_model'] = 'aaa new-model' in cli_output
-        analysis['security']['aaa']['authentication_login'] = CLIAnalyzer._extract_regex(lines,
-                                                                                         r'^aaa authentication login\s+(.+)')
-        analysis['security']['aaa']['authorization_exec'] = CLIAnalyzer._extract_regex(lines,
-                                                                                       r'^aaa authorization exec\s+(.+)')
-        analysis['security']['aaa']['accounting'] = CLIAnalyzer._extract_regex(lines, r'^aaa accounting exec\s+(.+)')
-
-        # Users & SNMP
-        for line in lines:
-            if line.startswith('username '):
-                m = re.match(r'username\s+(\S+)\s+privilege\s+(\d+)', line)
-                if m:
-                    analysis['security']['users'].append({'username': m.group(1), 'privilege': m.group(2)})
+        results: List[Dict[str, Any]] = []
+        current: Dict[str, Any] = {}
+        in_sys_descr = False
+        for ln in str(raw).splitlines():
+            line = ln.rstrip("\n")
+            if not line.strip():
+                continue
+            s = line.strip()
+            low = s.lower()
+            if low.startswith("local intf:") or low.startswith("local interface:") or low.startswith("local port:"):
+                if current.get("local_interface"):
+                    results.append(current)
+                current = {}
+                current["local_interface"] = s.split(":", 1)[1].strip()
+                in_sys_descr = False
+                continue
+            if ":" in s:
+                k, v = s.split(":", 1)
+                key = k.strip().lower()
+                val = v.strip()
+                if key in ("port id", "portid"):
+                    current["port_id"] = val
+                    in_sys_descr = False
+                elif key in ("system name",):
+                    current["system_name"] = val
+                    in_sys_descr = False
+                elif key in ("system description", "system descr"):
+                    current["system_description"] = (current.get("system_description", "") + " " + val).strip()
+                    in_sys_descr = True
+                elif key in ("chassis id",):
+                    current["chassis_id"] = val
+                    in_sys_descr = False
+                elif key in ("management address", "management ip", "mgmt address", "mgmt ip"):
+                    current["mgmt_ip"] = val
+                    in_sys_descr = False
                 else:
-                    m2 = re.match(r'username\s+(\S+)', line)
-                    if m2:
-                        analysis['security']['users'].append({'username': m2.group(1), 'privilege': '1'})
-
-            if line.startswith('snmp-server host'):
-                parts = line.split()
-                if len(parts) >= 3:
-                    analysis['security']['snmp']['communities'].append({
-                        'string': parts[2], 'permission': 'Host', 'acl': ''
-                    })
-            elif line.startswith('snmp-server community'):
-                parts = line.split()
-                if len(parts) >= 3:
-                    comm_str = parts[2]
-                    perm = parts[3] if len(parts) > 3 else 'RO'
-                    analysis['security']['snmp']['communities'].append({
-                        'string': comm_str, 'permission': perm, 'acl': ''
-                    })
-
-        # Lines
-        con_block = CLIAnalyzer._extract_blocks(lines, r'^line con')
-        if con_block:
-            analysis['security']['line_console'] = CLIAnalyzer._parse_line_block(con_block[0])
-
-        vty_blocks = CLIAnalyzer._extract_blocks(lines, r'^line vty')
-        if vty_blocks:
-            analysis['security']['line_vty'] = CLIAnalyzer._parse_line_block(vty_blocks[0])
-
-        # Hardening
-        analysis['security']['hardening']['no_ip_http'] = 'no ip http server' in cli_output
-        analysis['security']['hardening']['no_cdp'] = 'no cdp run' in cli_output
-
-        # --- 5. ACLs ---
-        analysis['acls'] = CLIAnalyzer._parse_acls_full(lines)
-
-        # --- 6. Routing ---
-        gw = CLIAnalyzer._extract_regex(lines, r'^ip default-gateway\s+(\S+)')
-        if gw:
-            analysis['routing']['static_routes'].append({
-                'network': '0.0.0.0', 'mask': '0.0.0.0', 'next_hop': gw, 'metric': '1', 'vrf': ''
-            })
-
-        for line in lines:
-            if line.startswith('ip route '):
-                parts = line.split()
-                if len(parts) >= 5:
-                    analysis['routing']['static_routes'].append({
-                        'network': parts[2], 'mask': parts[3], 'next_hop': parts[4], 'metric': '1', 'vrf': ''
-                    })
-
-        # --- 7. VLAN Inference (SVI) ---
-        for iface in analysis['interfaces']:
-            if iface['name'].startswith('Vlan'):
-                vid = iface['name'].replace('Vlan', '')
-                if vid.isdigit():
-                    existing = next((v for v in analysis['vlans']['list'] if v['id'] == vid), None)
-                    if existing:
-                        existing['svi_enabled'] = True
-                        existing['svi_ip'] = iface.get('routed_ip', '')
-                    else:
-                        analysis['vlans']['list'].append({
-                            'id': vid,
-                            'name': iface.get('description', f'VLAN{vid}'),
-                            'svi_enabled': True,
-                            'svi_ip': iface.get('routed_ip', '')
-                        })
-
-        return analysis
-
-    @staticmethod
-    def _extract_regex(lines: List[str], pattern: str) -> str:
-        for line in lines:
-            match = re.search(pattern, line)
-            if match: return match.group(1)
-        return ""
-
-    @staticmethod
-    def _extract_blocks(lines: List[str], start_pattern: str) -> List[List[str]]:
-        blocks = []
-        current_block = []
-        in_block = False
-        for line in lines:
-            stripped = line.strip()
-            if re.match(start_pattern, line):
-                if current_block: blocks.append(current_block)
-                current_block = [stripped]
-                in_block = True
-            elif in_block:
-                if line.startswith(' ') or line.startswith('\t'):
-                    current_block.append(stripped)
-                elif stripped == '!':
-                    in_block = False
-                    blocks.append(current_block)
-                    current_block = []
-                elif not line.startswith(' '):
-                    in_block = False
-                    blocks.append(current_block)
-                    current_block = []
-        if current_block: blocks.append(current_block)
-        return blocks
-
-    @staticmethod
-    def _parse_interfaces(blocks: List[List[str]]) -> List[Dict]:
-        interfaces = []
-        for block in blocks:
-            if not block: continue
-
-            name = block[0].replace('interface ', '').strip()
-            # [수정] shutdown이 보이면 True, 아니면 False (Active)
-            iface = {
-                'name': name, 'description': '', 'shutdown': False,
-                'mode': 'access', 'access_vlan': '', 'trunk_allowed': '',
-                'routed_ip': ''
-            }
-
-            for line in block[1:]:
-                if line.startswith('description '):
-                    iface['description'] = line[12:].strip()
-                elif line == 'shutdown':
-                    iface['shutdown'] = True
-                elif line.startswith('switchport access vlan'):
-                    iface['access_vlan'] = line.split()[-1]
-                    iface['mode'] = 'L2 Access'
-                elif line.startswith('switchport mode trunk'):
-                    iface['mode'] = 'L2 Trunk'
-                elif line.startswith('switchport trunk allowed vlan'):
-                    iface['trunk_allowed'] = line.replace('switchport trunk allowed vlan', '').strip()
-                elif line.startswith('ip address'):
-                    parts = line.split()
-                    if len(parts) >= 4:
-                        iface['routed_ip'] = f"{parts[2]} {parts[3]}"
-                        iface['mode'] = 'L3 Routed'
-
-            interfaces.append(iface)
-        return interfaces
-
-    @staticmethod
-    def _parse_acls_full(lines: List[str]) -> List[Dict]:
-        acls = []
-        current_acl = {}
-        in_acl = False
-
-        for line in lines:
-            line_raw = line
-            stripped = line.strip()
-
-            if stripped.startswith('ip access-list'):
-                if current_acl: acls.append(current_acl)
-                parts = stripped.split()
-                if len(parts) >= 4:
-                    in_acl = True
-                    acl_type = parts[2].capitalize()
-                    name = parts[3]
-                    current_acl = {'name': name, 'type': acl_type, 'description': '', 'rules': []}
-            elif in_acl:
-                if line_raw.startswith(' ') or line_raw.startswith('\t'):
-                    parts = stripped.split()
-                    rule = {'seq': '', 'action': 'permit', 'protocol': 'ip', 'src_ip': 'any', 'dst_ip': 'any',
-                            'options': ''}
-
-                    idx = 0
-                    if parts[0].isdigit():
-                        rule['seq'] = parts[0]
-                        idx = 1
-                    if idx < len(parts): rule['action'] = parts[idx]
-                    if len(parts) > idx + 1: rule['options'] = " ".join(parts[idx + 1:])
-
-                    current_acl['rules'].append(rule)
-                else:
-                    in_acl = False
-                    if current_acl: acls.append(current_acl)
-                    current_acl = {}
-
-        if current_acl: acls.append(current_acl)
-        return acls
-
-    @staticmethod
-    def _parse_line_block(lines: List[str]) -> Dict:
-        config = {'range': '', 'exec_timeout': '', 'logging_synchronous': False, 'transport_input': '',
-                  'access_class': ''}
-        if lines and lines[0].startswith('line'):
-            parts = lines[0].split()
-            if len(parts) >= 3: config['range'] = " ".join(parts[2:])
-
-        for line in lines[1:]:
-            if line.startswith('exec-timeout'):
-                config['exec_timeout'] = line.replace('exec-timeout ', '').strip()
-            elif line == 'logging synchronous':
-                config['logging_synchronous'] = True
-            elif line.startswith('transport input'):
-                config['transport_input'] = line.split()[-1]
-            elif line.startswith('access-class'):
-                config['access_class'] = line.split()[1]
-        return config
-
-    @staticmethod
-    def _parse_show_vlan_brief(output: str) -> List[Dict]:
-        vlans = []
-        lines = output.split('\n')
-        for line in lines:
-            parts = line.split()
-            if len(parts) >= 2 and parts[0].isdigit():
-                vlans.append({
-                    'id': parts[0],
-                    'name': parts[1],
-                    'description': ''
-                })
-        return vlans
-
-
-class CiscoCommandGenerator:
-    def generate_commands(self, original: Dict, modified: Dict) -> List[str]:
-        return ["configure terminal", "! Commands generated", "end"]
-
-
-class DeploymentManager:
-    def __init__(self, connection_manager):
-        self.cm = connection_manager
-
-    def validate_commands(self, cmds): return True, []
-
-    def rollback(self, device): return {'success': False}
+                    in_sys_descr = False
+            else:
+                if in_sys_descr and current.get("system_description"):
+                    current["system_description"] = (str(current.get("system_description") or "") + " " + s).strip()
+        if current.get("local_interface"):
+            results.append(current)
+        return results

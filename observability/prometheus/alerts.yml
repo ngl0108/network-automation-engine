@@ -1,0 +1,38 @@
+groups:
+  - name: netsphere.rules
+    rules:
+      - alert: NetSphereDeviceDown
+        expr: netsphere_device_up == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Device down: {{ $labels.name }} ({{ $labels.ip }})"
+          description: "Device has been unreachable for more than 5 minutes."
+
+      - alert: NetSphereDeviceHighCPU
+        expr: netsphere_device_cpu_percent > 80
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU: {{ $labels.name }} ({{ $labels.ip }})"
+          description: "CPU usage is above 80% for more than 10 minutes."
+
+      - alert: NetSphereDeviceHighMemory
+        expr: netsphere_device_memory_percent > 85
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High Memory: {{ $labels.name }} ({{ $labels.ip }})"
+          description: "Memory usage is above 85% for more than 10 minutes."
+
+      - alert: NetSphereBackendDown
+        expr: up{job="netmanager-backend"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "NetSphere backend scrape target is down"
+          description: "Prometheus cannot scrape the NetSphere backend /metrics endpoint."

@@ -1,60 +1,39 @@
+import difflib
+from typing import List
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from typing import List
-
+from pydantic import BaseModel
+from datetime import datetime
 from app.db.session import get_db
-from app.models.device import Device, ConfigBackup
-from app.models.config_template import ConfigTemplate  # 템플릿 모델 추가
-from app.schemas.device import ConfigBackupResponse
-from app.services.ssh_service import DeviceConnection, DeviceInfo
-from app.services.parser_service import CLIAnalyzer
-from app.tasks.config import pull_and_parse_config, deploy_config_task  # 배포 태스크 추가
+from app.models.device import ConfigBackup
 
 router = APIRouter()
 
 
-@router.post("/pull/{device_id}", response_model=ConfigBackupResponse)
-def pull_config_from_device(device_id: int, db: Session = Depends(get_db)):
-    """
-    지정된 장비(ID)에 SSH로 접속하여 설정을 가져오고, 파싱하여 DB에 저장합니다.
-    """
-    device = db.query(Device).filter(Device.id == device_id).first()
-    if not device:
-        raise HTTPException(status_code=404, detail="장비를 찾을 수 없습니다.")
+class ConfigBackupResponse(BaseModel):
+    id: int
+    raw_config: str
+    created_at: datetime
 
-    task = pull_and_parse_config.delay(device_id)
-
-    raise HTTPException(status_code=202, detail={
-        "message": "Config pull 요청이 접수되었습니다. 백그라운드에서 처리 중입니다.",
-        "task_id": task.id
-    })
+    class Config: from_attributes = True
 
 
 @router.get("/history/{device_id}", response_model=List[ConfigBackupResponse])
 def get_config_history(device_id: int, db: Session = Depends(get_db)):
-    """
-    특정 장비의 설정 백업 이력을 최신순으로 조회합니다.
-    """
-    backups = db.query(ConfigBackup) \
-        .filter(ConfigBackup.device_id == device_id) \
-        .order_by(ConfigBackup.created_at.desc()) \
-        .all()
-    return backups
+    return db.query(ConfigBackup).filter(ConfigBackup.device_id == device_id).order_by(
+        ConfigBackup.created_at.desc()).all()
 
 
-@router.post("/deploy/{device_id}/{template_id}")
-def deploy_config(device_id: int, template_id: int, db: Session = Depends(get_db)):
-    """
-    지정된 장비에 템플릿 기반으로 Config 배포 요청
-    """
-    device = db.query(Device).filter(Device.id == device_id).first()
-    if not device:
-        raise HTTPException(status_code=404, detail="장비를 찾을 수 없습니다.")
+@router.get("/diff/{backup_id_a}/{backup_id_b}")
+def compare_backups(backup_id_a: int, backup_id_b: int, db: Session = Depends(get_db)):
+    b_a = db.query(ConfigBackup).filter(ConfigBackup.id == backup_id_a).first()
+    b_b = db.query(ConfigBackup).filter(ConfigBackup.id == backup_id_b).first()
 
-    template = db.query(ConfigTemplate).filter(ConfigTemplate.id == template_id).first()
-    if not template:
-        raise HTTPException(status_code=404, detail="템플릿을 찾을 수 없습니다.")
+    if not b_a or not b_b: raise HTTPException(404, "Backup not found")
 
-    task = deploy_config_task.delay(device_id, template_id)
-
-    return {"message": "Config 배포 요청이 접수되었습니다. 백그라운드에서 처리 중입니다.", "task_id": task.id}
+    diff = difflib.unified_diff(
+        b_a.raw_config.splitlines(),
+        b_b.raw_config.splitlines(),
+        fromfile=f"Ver {b_a.id}", tofile=f"Ver {b_b.id}", lineterm=""
+    )
+    return {"diff_lines": list(diff)}

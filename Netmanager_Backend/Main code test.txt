@@ -1,0 +1,62 @@
+내 eve-ng cli
+root
+Password1!
+
+GUI
+admin
+eve
+
+메일테스트 구글앱비번
+kim8926602@gmail.com 계정
+miyp ufuv nuaj gmuv
+
+네이버앱비번
+quddbsrla01@naver.com
+16B53HH41QEM
+
+회사 esxi서버
+root
+Password1!!@
+
+dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart
+
+dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart
+
+
+.\venv\Scripts\Activate
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+.\venv\Scripts\Activate
+python -m celery -A celery_app worker --pool=solo --loglevel=info
+
+.\venv\Scripts\Activate
+python -m celery -A celery_app beat --loglevel=info
+
+# 가상환경 켜진 상태에서
+python populate_db.py
+
+npm run dev
+
+admin / admin123
+
+taskkill /f /im python.exe
+
+CiscoConfParse
+
+SNMP Community
+jjckkjl
+automation_test
+
+
+:: 1. 폴더로 이동 (탐색기 주소창에 cmd 치면 바로 열림)
+cd "C:\Users\ngl01\Desktop\김병윤\0. 개인\0. 개인프로젝트정리\Pyside Gui Config 프로그램"
+:: 2. 서버 실행 (백그라운드)
+docker-compose up -d
+:: 3. 서버 중지
+docker-compose down
+4. 코드 수정시
+docker-compose up -d --build
+# 상태 확인
+docker ps
+# 로그 확인
+docker-compose logs -f

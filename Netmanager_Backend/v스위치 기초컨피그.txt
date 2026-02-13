@@ -1,0 +1,34 @@
+configure terminal
+
+interface GigabitEthernet0/0
+ description Link_to_L3
+ ip address 10.250.250.73 255.255.0.0
+ no shutdown
+ exit
+
+hostname vSwitchL2_Arista_01
+ip domain-name coupang
+username admin privilege 15 secret Password1!
+
+
+ip route 0.0.0.0 0.0.0.0 10.250.0.1
+
+
+ip ssh version 2
+line vty 0 4
+ login local
+ transport input ssh
+ exit
+line console 0
+ login local
+ exit
+s
+crypto key genrate 1024
+service timestamps log datetime msec
+logging host 10.1.3.151
+logging trap informational
+
+
+snmp-server community jjckkjl RO
+snmp-server host 10.1.3.151 version 2c jjckkjl
+
