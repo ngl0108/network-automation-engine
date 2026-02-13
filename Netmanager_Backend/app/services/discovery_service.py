@@ -467,6 +467,24 @@ class DiscoveryService:
             self._append_job_log(job, "Scan Completed Successfully.")
             db.commit()
 
+            try:
+                from app.services.topology_snapshot_policy_service import TopologySnapshotPolicyService
+                from app.models.settings import SystemSetting
+
+                row = db.query(SystemSetting).filter(SystemSetting.key == "topology_snapshot_auto_on_discovery_job_complete").first()
+                enabled = True
+                if row and row.value is not None:
+                    enabled = str(row.value).strip().lower() in {"1", "true", "yes", "y", "on"}
+                if enabled:
+                    TopologySnapshotPolicyService.maybe_create_snapshot(
+                        db,
+                        site_id=getattr(job, "site_id", None),
+                        job_id=int(job.id),
+                        trigger="discovery_job_completed",
+                    )
+            except Exception:
+                pass
+
         except Exception as e:
             job.status = "failed"
             self._append_job_log(job, f"[Error] Scan Failed: {str(e)}")

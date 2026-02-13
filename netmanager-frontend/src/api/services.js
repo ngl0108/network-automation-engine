@@ -103,7 +103,7 @@ export const DeviceService = {
   getDashboardStats: (siteId) => api.get('/sdn/dashboard/stats', { params: { site_id: siteId } }),
   getAnalytics: (range) => api.get(`/devices/analytics?range=${range}`),
   // getTopology: Moved to SDNService for consistency with PathTrace
-  getTopology: () => api.get('/devices/topology/links'),
+  getTopology: (params = {}) => api.get('/devices/topology/links', { params }),
   getEndpointGroupDetails: (deviceId, port, params = {}) => api.get('/devices/topology/endpoint-group', { params: { device_id: deviceId, port, ...params } }),
 
   // --- [Feature 1] 사이트 관리 (Site Ops) ---
@@ -174,7 +174,7 @@ export const SDNService = {
   deployPolicy: (id, deviceIds) => api.post(`/sdn/policies/${id}/deploy`, { device_ids: deviceIds }), // List[int] wrapped in object
 
   // [PathTrace] Topology
-  getTopology: () => api.get('/devices/topology/links'),
+  getTopology: (params = {}) => api.get('/devices/topology/links', { params }),
   tracePath: (srcIp, dstIp) => api.post('/topology/path-trace', { src_ip: srcIp, dst_ip: dstIp }),
 
   // [Fabric] Automation
@@ -295,6 +295,10 @@ export const TopologyService = {
   getLayout: () => api.get('/topology/layout'),
   saveLayout: (layoutData) => api.post('/topology/layout', layoutData),
   resetLayout: () => api.delete('/topology/layout'),
+  listSnapshots: (params = {}) => api.get('/topology/snapshots', { params }),
+  createSnapshot: (payload) => api.post('/topology/snapshots', payload),
+  getSnapshot: (id) => api.get(`/topology/snapshots/${id}`),
+  diffSnapshots: (snapshotA, snapshotB) => api.get('/topology/diff', { params: { snapshot_a: snapshotA, snapshot_b: snapshotB } }),
   getCandidates: (params = {}) => api.get('/topology/candidates', { params }),
   getCandidateRecommendations: (candidateId, params = {}) => api.get(`/topology/candidates/${candidateId}/recommendations`, { params }),
   promoteCandidate: (candidateId, payload) => api.post(`/topology/candidates/${candidateId}/promote`, payload),

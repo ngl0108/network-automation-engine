@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import json
 from typing import Any, Dict, Iterable, Optional, Tuple
 
 from sqlalchemy import func, or_
@@ -6,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.device import Device, Link
+from app.models.topology import TopologyChangeEvent
 
 
 class TopologyLinkService:
@@ -210,7 +212,7 @@ class TopologyLinkService:
                 existing.confidence = max(float(existing.confidence or 0.0), float(confidence or 0.0))
                 updated += 1
                 if prev != "active":
-                    touched.append((src_id, dst_id, protocol, "active"))
+                    touched.append((src_id, src_intf, dst_id, dst_intf, protocol, "active"))
             else:
                 try:
                     with db.begin_nested():
@@ -230,7 +232,7 @@ class TopologyLinkService:
                         db.add(link)
                         db.flush()
                     created += 1
-                    touched.append((src_id, dst_id, protocol, "active"))
+                    touched.append((src_id, src_intf, dst_id, dst_intf, protocol, "active"))
                 except IntegrityError:
                     existing = db.query(Link).filter(
                         Link.source_device_id == src_id,
@@ -244,7 +246,7 @@ class TopologyLinkService:
                         existing.last_seen = now
                         existing.confidence = max(float(existing.confidence or 0.0), float(confidence or 0.0))
                         updated += 1
-                        touched.append((src_id, dst_id, protocol, "active"))
+                        touched.append((src_id, src_intf, dst_id, dst_intf, protocol, "active"))
 
         for key, link in existing_by_key.items():
             if key in seen:
@@ -252,23 +254,58 @@ class TopologyLinkService:
             prev = link.status
             link.status = "inactive"
             if prev != "inactive":
-                touched.append((link.source_device_id, link.target_device_id, link.protocol or "UNKNOWN", "down"))
+                touched.append(
+                    (
+                        link.source_device_id,
+                        link.source_interface_name or "",
+                        link.target_device_id,
+                        link.target_interface_name or "",
+                        link.protocol or "UNKNOWN",
+                        "down",
+                    )
+                )
 
         if touched:
             try:
                 from app.services.realtime_event_bus import realtime_event_bus
 
-                for src_id, dst_id, protocol, state in touched[:2000]:
+                for src_id, src_intf, dst_id, dst_intf, protocol, state in touched[:2000]:
                     realtime_event_bus.publish(
                         "link_update",
                         {
                             "device_id": src_id,
                             "neighbor_device_id": dst_id,
+                            "local_interface": src_intf,
+                            "remote_interface": dst_intf,
                             "protocol": protocol,
                             "state": state,
                             "ts": now.isoformat(),
                             "source": "topology_refresh",
                         },
+                    )
+            except Exception:
+                pass
+
+            try:
+                site_id = getattr(device, "site_id", None)
+                for src_id, src_intf, dst_id, dst_intf, protocol, state in touched[:2000]:
+                    payload = {
+                        "device_id": src_id,
+                        "neighbor_device_id": dst_id,
+                        "local_interface": src_intf,
+                        "remote_interface": dst_intf,
+                        "protocol": protocol,
+                        "state": state,
+                        "ts": now.isoformat(),
+                        "source": "topology_refresh",
+                    }
+                    db.add(
+                        TopologyChangeEvent(
+                            site_id=site_id,
+                            device_id=int(getattr(device, "id")),
+                            event_type="link_update",
+                            payload_json=json.dumps(payload, ensure_ascii=False),
+                        )
                     )
             except Exception:
                 pass

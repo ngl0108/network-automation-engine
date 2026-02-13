@@ -1,7 +1,7 @@
 import random
 import re
 from datetime import datetime, timedelta
-from typing import List, Any
+from typing import List, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import func, and_
@@ -301,7 +301,28 @@ def get_analytics_data(time_range: str = Query("24h", alias="range"), db: Sessio
 # [Topology] 토폴로지 데이터 (수정됨: site_id 포함)
 # --------------------------------------------------------------------------
 @router.get("/topology/links")
-def get_topology_links(db: Session = Depends(get_db), current_user: User = Depends(deps.require_viewer)):
+def get_topology_links(
+    snapshot_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(deps.require_viewer),
+):
+    if snapshot_id is not None:
+        import json
+        from fastapi import HTTPException
+        from app.models.topology import TopologySnapshot
+
+        snap = db.query(TopologySnapshot).filter(TopologySnapshot.id == snapshot_id).first()
+        if not snap:
+            raise HTTPException(status_code=404, detail="Snapshot not found")
+        try:
+            nodes = json.loads(snap.nodes_json or "[]")
+        except Exception:
+            nodes = []
+        try:
+            links = json.loads(snap.links_json or "[]")
+        except Exception:
+            links = []
+        return {"nodes": nodes, "links": links, "snapshot_id": int(snap.id)}
     from datetime import datetime, timedelta
     from app.models.endpoint import Endpoint, EndpointAttachment
     from app.services.snmp_service import SnmpManager

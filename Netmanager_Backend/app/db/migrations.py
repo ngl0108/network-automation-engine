@@ -226,6 +226,8 @@ def run_migrations(engine: Engine) -> None:
         has_compliance_rules = _table_exists(conn, dialect, "compliance_rules")
         has_compliance_reports = _table_exists(conn, dialect, "compliance_reports")
         has_topology_layout = _table_exists(conn, dialect, "topology_layout")
+        has_topology_snapshots = _table_exists(conn, dialect, "topology_snapshots")
+        has_topology_change_events = _table_exists(conn, dialect, "topology_change_events")
 
         if has_profiles:
             if _has_column(conn, dialect, "snmp_credential_profiles", "ssh_username") is False:
@@ -762,6 +764,94 @@ def run_migrations(engine: Engine) -> None:
         if has_topology_layout:
             if _has_column(conn, dialect, "topology_layout", "user_id") and not _index_exists(conn, dialect, "ix_topology_layout_user_id"):
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_topology_layout_user_id ON topology_layout (user_id)"))
+
+        if not has_topology_snapshots:
+            if dialect == "postgresql":
+                conn.execute(
+                    text(
+                        """
+                        CREATE TABLE IF NOT EXISTS topology_snapshots (
+                            id SERIAL PRIMARY KEY,
+                            site_id INTEGER NULL,
+                            job_id INTEGER NULL,
+                            label VARCHAR(255) NULL,
+                            node_count INTEGER NOT NULL DEFAULT 0,
+                            link_count INTEGER NOT NULL DEFAULT 0,
+                            nodes_json TEXT NOT NULL DEFAULT '[]',
+                            links_json TEXT NOT NULL DEFAULT '[]',
+                            metadata_json TEXT NOT NULL DEFAULT '{}',
+                            created_at TIMESTAMP NOT NULL DEFAULT NOW()
+                        )
+                        """
+                    )
+                )
+            else:
+                conn.execute(
+                    text(
+                        """
+                        CREATE TABLE IF NOT EXISTS topology_snapshots (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            site_id INTEGER NULL,
+                            job_id INTEGER NULL,
+                            label VARCHAR(255) NULL,
+                            node_count INTEGER NOT NULL DEFAULT 0,
+                            link_count INTEGER NOT NULL DEFAULT 0,
+                            nodes_json TEXT NOT NULL DEFAULT '[]',
+                            links_json TEXT NOT NULL DEFAULT '[]',
+                            metadata_json TEXT NOT NULL DEFAULT '{}',
+                            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                        )
+                        """
+                    )
+                )
+            has_topology_snapshots = True
+
+        if has_topology_snapshots:
+            if not _index_exists(conn, dialect, "ix_topology_snapshots_site_id"):
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_topology_snapshots_site_id ON topology_snapshots (site_id)"))
+            if not _index_exists(conn, dialect, "ix_topology_snapshots_created_at"):
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_topology_snapshots_created_at ON topology_snapshots (created_at)"))
+
+        if not has_topology_change_events:
+            if dialect == "postgresql":
+                conn.execute(
+                    text(
+                        """
+                        CREATE TABLE IF NOT EXISTS topology_change_events (
+                            id SERIAL PRIMARY KEY,
+                            site_id INTEGER NULL,
+                            device_id INTEGER NULL,
+                            event_type VARCHAR(64) NOT NULL,
+                            payload_json TEXT NOT NULL DEFAULT '{}',
+                            created_at TIMESTAMP NOT NULL DEFAULT NOW()
+                        )
+                        """
+                    )
+                )
+            else:
+                conn.execute(
+                    text(
+                        """
+                        CREATE TABLE IF NOT EXISTS topology_change_events (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            site_id INTEGER NULL,
+                            device_id INTEGER NULL,
+                            event_type VARCHAR(64) NOT NULL,
+                            payload_json TEXT NOT NULL DEFAULT '{}',
+                            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                        )
+                        """
+                    )
+                )
+            has_topology_change_events = True
+
+        if has_topology_change_events:
+            if not _index_exists(conn, dialect, "ix_topology_change_events_site_id"):
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_topology_change_events_site_id ON topology_change_events (site_id)"))
+            if not _index_exists(conn, dialect, "ix_topology_change_events_device_id"):
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_topology_change_events_device_id ON topology_change_events (device_id)"))
+            if not _index_exists(conn, dialect, "ix_topology_change_events_created_at"):
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_topology_change_events_created_at ON topology_change_events (created_at)"))
 
         if has_devices:
             _encrypt_table_columns(

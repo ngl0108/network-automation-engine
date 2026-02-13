@@ -37,5 +37,11 @@ def test_settings_defaults_include_auto_discovery_status_keys():
         assert "post_check_role_access" in keys
         assert "post_check_role_edge" in keys
         assert "post_check_role_firewall" in keys
+        assert "topology_snapshot_auto_enabled" in keys
+        assert "topology_snapshot_auto_scope" in keys
+        assert "topology_snapshot_auto_interval_minutes" in keys
+        assert "topology_snapshot_auto_change_threshold_links" in keys
+        assert "topology_snapshot_auto_on_discovery_job_complete" in keys
+        assert "topology_snapshot_auto_on_topology_refresh" in keys
     finally:
         db.close()

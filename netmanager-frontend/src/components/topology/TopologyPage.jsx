@@ -394,6 +394,10 @@ const TopologyPage = () => {
   const [sites, setSites] = useState([]);
   const [selectedSiteId, setSelectedSiteId] = useState('all');
   const [rawTopology, setRawTopology] = useState({ nodes: [], links: [] });
+  const [topologySnapshots, setTopologySnapshots] = useState([]);
+  const [selectedSnapshotId, setSelectedSnapshotId] = useState('');
+  const [snapshotLoading, setSnapshotLoading] = useState(false);
+  const snapshotModeRef = useRef(false);
 
   // Tooltip
   const [tooltip, setTooltip] = useState(null);
@@ -485,7 +489,7 @@ const TopologyPage = () => {
     try {
       console.log("📡 Fetching Topology & Sites...");
       const [topoRes, siteRes] = await Promise.all([
-        SDNService.getTopology(),
+        SDNService.getTopology(selectedSnapshotId ? { snapshot_id: selectedSnapshotId } : {}),
         DeviceService.getSites()
       ]);
 
@@ -499,6 +503,18 @@ const TopologyPage = () => {
       console.error("❌ Error loading data:", error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadSnapshots = async () => {
+    setSnapshotLoading(true);
+    try {
+      const res = await TopologyService.listSnapshots({ limit: 50 });
+      setTopologySnapshots(Array.isArray(res.data) ? res.data : []);
+    } catch (e) {
+      setTopologySnapshots([]);
+    } finally {
+      setSnapshotLoading(false);
     }
   };
 
@@ -647,6 +663,18 @@ const TopologyPage = () => {
   }, [refreshKey]);
 
   useEffect(() => {
+    snapshotModeRef.current = !!selectedSnapshotId;
+    if (selectedSnapshotId) {
+      setAutoRefreshTopology(false);
+    }
+    loadData();
+  }, [selectedSnapshotId]);
+
+  useEffect(() => {
+    loadSnapshots();
+  }, [refreshKey]);
+
+  useEffect(() => {
     if (esRef.current) {
       try { esRef.current.close(); } catch (e) { void e; }
       esRef.current = null;
@@ -661,6 +689,7 @@ const TopologyPage = () => {
 
     es.addEventListener('link_update', (evt) => {
       try {
+        if (snapshotModeRef.current) return;
         const msg = JSON.parse(evt.data || '{}');
         const deviceId = msg.device_id != null ? String(msg.device_id) : null;
         const neighborId = msg.neighbor_device_id != null ? String(msg.neighbor_device_id) : null;
@@ -1224,6 +1253,43 @@ const TopologyPage = () => {
               <option value="all">Global View (All Sites)</option>
               {sites.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
+          </div>
+
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-white dark:bg-[#25282c] border border-gray-300 dark:border-gray-700 rounded-md shadow-sm">
+            <span className="text-xs font-bold text-gray-500">Snapshot</span>
+            <select
+              value={selectedSnapshotId}
+              onChange={(e) => setSelectedSnapshotId(e.target.value)}
+              className="text-sm bg-transparent outline-none text-gray-700 dark:text-gray-300 cursor-pointer min-w-[220px]"
+            >
+              <option value="">Live</option>
+              {topologySnapshots.map((s) => (
+                <option key={s.id} value={String(s.id)}>
+                  {s.label ? `${s.label} (#${s.id})` : `#${s.id}`} {s.created_at ? `· ${new Date(s.created_at).toLocaleString()}` : ''}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={async () => {
+                try {
+                  const siteId = selectedSiteId !== 'all' ? Number(selectedSiteId) : null;
+                  await TopologyService.createSnapshot({
+                    site_id: siteId,
+                    label: `manual ${new Date().toISOString().slice(0, 19).replace('T', ' ')}`,
+                    metadata: { trigger: 'ui' }
+                  });
+                  await loadSnapshots();
+                  toast.success('Snapshot created');
+                } catch (e) {
+                  toast.error('Failed to create snapshot');
+                }
+              }}
+              disabled={snapshotLoading}
+              className="px-2 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-xs font-bold disabled:opacity-50"
+              title="Create snapshot"
+            >
+              {snapshotLoading ? '...' : 'Save'}
+            </button>
           </div>
 
 

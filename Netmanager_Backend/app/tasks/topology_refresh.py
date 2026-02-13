@@ -15,6 +15,7 @@ from app.models.topology_candidate import TopologyNeighborCandidate
 from app.models.settings import SystemSetting
 from app.services.ssh_service import DeviceConnection, DeviceInfo
 from app.services.topology_link_service import TopologyLinkService
+from app.services.topology_snapshot_policy_service import TopologySnapshotPolicyService
 from app.services.snmp_service import SnmpManager
 from app.services.snmp_l2_service import SnmpL2Service
 from sqlalchemy.sql import func
@@ -296,6 +297,24 @@ def refresh_device_topology(device_id: int, discovery_job_id: int = None, max_de
                         created_candidates += 1
 
                     db.commit()
+
+        try:
+            auto_on_refresh = _get_setting_value(db, "topology_snapshot_auto_on_topology_refresh").strip().lower() in {"1", "true", "yes", "y", "on"}
+        except Exception:
+            auto_on_refresh = False
+
+        if auto_on_refresh:
+            try:
+                root = db.query(Device).filter(Device.id == device_id).first()
+                site_id = getattr(job, "site_id", None) if job else getattr(root, "site_id", None) if root else None
+                TopologySnapshotPolicyService.maybe_create_snapshot(
+                    db,
+                    site_id=site_id,
+                    job_id=(job.id if job else None),
+                    trigger="topology_refresh",
+                )
+            except Exception:
+                pass
 
         return {
             "status": "ok",

@@ -18,6 +18,7 @@ from app.models.discovery import DiscoveryJob, DiscoveredDevice
 from app.models.topology_candidate import TopologyNeighborCandidate
 from app.services.candidate_recommendation_service import CandidateRecommendationService
 from app.services.realtime_event_bus import realtime_event_bus
+from app.services.topology_snapshot_service import TopologySnapshotService
 
 router = APIRouter()
 
@@ -136,6 +137,64 @@ async def stream_topology_events(
             realtime_event_bus.unsubscribe(q)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+class SnapshotCreateRequest(BaseModel):
+    site_id: Optional[int] = None
+    job_id: Optional[int] = None
+    label: Optional[str] = None
+    metadata: Optional[dict] = None
+
+
+@router.get("/snapshots")
+def list_topology_snapshots(
+    site_id: Optional[int] = None,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(deps.require_viewer),
+):
+    return TopologySnapshotService.list_snapshots(db, site_id=site_id, limit=limit)
+
+
+@router.post("/snapshots")
+def create_topology_snapshot(
+    req: SnapshotCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(deps.require_operator),
+):
+    snap = TopologySnapshotService.create_snapshot(
+        db,
+        site_id=req.site_id,
+        job_id=req.job_id,
+        label=req.label,
+        metadata=req.metadata or {},
+    )
+    return TopologySnapshotService.to_dict(snap)
+
+
+@router.get("/snapshots/{snapshot_id}")
+def get_topology_snapshot(
+    snapshot_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(deps.require_viewer),
+):
+    try:
+        return TopologySnapshotService.get_snapshot_graph(db, snapshot_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get("/diff")
+def diff_topology_snapshots(
+    snapshot_a: int,
+    snapshot_b: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(deps.require_viewer),
+):
+    try:
+        return TopologySnapshotService.diff_snapshots(db, snapshot_a, snapshot_b)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 @router.get("/candidates")
