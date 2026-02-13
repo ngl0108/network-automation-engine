@@ -83,6 +83,9 @@ class DasanDriver(GenericDriver):
             
         return neighbors
 
+    def apply_config_replace(self, raw_config: str) -> Dict[str, Any]:
+        return super().apply_config_replace(raw_config)
+
     def _parse_dasan_lldp(self, raw: str) -> List[Dict[str, Any]]:
         """
         Parses Dasan 'show lldp neighbor' output.

@@ -16,6 +16,7 @@ import DeviceDetailPage from './pages/DeviceDetailPage';
 import LoginPage from './pages/LoginPage';
 import ObservabilityPage from './pages/ObservabilityPage';
 import AutomationHubPage from './pages/AutomationHubPage';
+import DiagnosisPage from './pages/DiagnosisPage';
 
 // [신규] 운영 및 설정 페이지들
 import ImagePage from './components/images/ImagePage';
@@ -116,6 +117,7 @@ function App() {
 
                         <Route path="/observability" element={<ObservabilityPage />} />
                         <Route path="/automation" element={<AutomationHubPage />} />
+                        <Route path="/diagnosis" element={<DiagnosisPage />} />
                       </Routes>
                     </Layout>
                   </ProtectedRoute>

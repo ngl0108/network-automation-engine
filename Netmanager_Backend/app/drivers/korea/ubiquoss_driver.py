@@ -102,3 +102,6 @@ class UbiquossDriver(GenericDriver):
                 })
                 
         return neighbors
+
+    def apply_config_replace(self, raw_config: str) -> Dict[str, Any]:
+        return super().apply_config_replace(raw_config)

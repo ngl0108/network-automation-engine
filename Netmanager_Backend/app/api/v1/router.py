@@ -3,7 +3,7 @@ from app.api.v1.endpoints import (
     devices, sites, logs, misc, auth, # [FIX] auth 추가
     config, config_template, variables, compliance,
     jobs,
-    images, policy, settings, ztp, audit, topology, fabric, discovery, visual_config, approval, traffic, snmp_profiles, observability, automation_hub # [NEW] Approval
+    images, policy, settings, ztp, audit, topology, fabric, discovery, visual_config, approval, traffic, snmp_profiles, observability, automation_hub, diagnosis # [NEW] Approval
 )
 
 api_router = APIRouter()
@@ -42,4 +42,5 @@ api_router.include_router(traffic.router, prefix="/traffic", tags=["traffic"])
 api_router.include_router(snmp_profiles.router, prefix="/snmp-profiles", tags=["snmp-profiles"])
 api_router.include_router(observability.router, prefix="/observability", tags=["observability"])
 api_router.include_router(automation_hub.router, prefix="/automation-hub", tags=["automation-hub"])
+api_router.include_router(diagnosis.router, prefix="/diagnosis", tags=["diagnosis"])
 

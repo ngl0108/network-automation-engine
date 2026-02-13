@@ -27,5 +27,15 @@ def test_settings_defaults_include_auto_discovery_status_keys():
         assert "auto_topology_last_enqueued_ok" in keys
         assert "auto_topology_last_enqueued_fail" in keys
         assert "auto_topology_last_error" in keys
+        assert "config_drift_enabled" in keys
+        assert "config_drift_approval_enabled" in keys
+        assert "config_replace_vendor_dasan_nos" in keys
+        assert "config_replace_vendor_ubiquoss_l2" in keys
+        assert "config_replace_vendor_ubiquoss_l3" in keys
+        assert "post_check_role_core" in keys
+        assert "post_check_role_distribution" in keys
+        assert "post_check_role_access" in keys
+        assert "post_check_role_edge" in keys
+        assert "post_check_role_firewall" in keys
     finally:
         db.close()

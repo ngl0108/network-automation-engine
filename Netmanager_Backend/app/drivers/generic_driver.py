@@ -6,6 +6,7 @@ except Exception:  # pragma: no cover
 from typing import Dict, List, Any, Optional
 import os
 import logging
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +124,229 @@ class GenericDriver(NetworkDriver):
             return {"success": True, "output": output}
         except Exception as e:
             return {"success": False, "error": str(e)}
+
+    def _looks_like_cli_error(self, output: str) -> bool:
+        t = (output or "").lower()
+        return any(
+            s in t
+            for s in (
+                "% invalid",
+                "invalid input",
+                "unknown command",
+                "unrecognized command",
+                "ambiguous command",
+                "incomplete command",
+                "error:",
+                "syntax error",
+                "failed",
+            )
+        )
+
+    def apply_config_replace(self, raw_config: str) -> Dict[str, Any]:
+        if not self.connection:
+            raise ConnectionError("Not connected")
+
+        dtype = str(self.device_type or "").lower()
+        profile = getattr(self, "_config_replace_profile", None)
+        if isinstance(profile, dict):
+            dtype = str(profile.get("device_type") or dtype).lower()
+        suffix = f"golden_{uuid.uuid4().hex[:10]}.cfg"
+
+        if isinstance(profile, dict) and isinstance(profile.get("file_systems"), list) and profile.get("file_systems"):
+            file_systems = [str(x).strip() for x in profile.get("file_systems") if str(x).strip()]
+        else:
+            if "nxos" in dtype or "cisco_nxos" in dtype:
+                file_systems = ["bootflash:"]
+            else:
+                file_systems = ["flash:", "bootflash:", "disk0:", "primary:", "secondary:"]
+
+        replace_cmds: List[str] = []
+        if isinstance(profile, dict) and isinstance(profile.get("replace_commands"), list) and profile.get("replace_commands"):
+            replace_cmds = [str(x).strip() for x in profile.get("replace_commands") if str(x).strip()]
+        else:
+            if "nxos" in dtype or "cisco_nxos" in dtype:
+                replace_cmds = [
+                    "configure replace {path} force",
+                    "rollback running-config file {path}",
+                ]
+            else:
+                replace_cmds = [
+                    "configure replace {path} force",
+                    "configuration replace {path} force",
+                ]
+
+        save_cmds: List[str] = []
+        if isinstance(profile, dict) and isinstance(profile.get("save_commands"), list):
+            save_cmds = [str(x).strip() for x in profile.get("save_commands") if str(x).strip()]
+        else:
+            if "huawei" in dtype:
+                save_cmds = ["save"]
+            elif "juniper" in dtype or "junos" in dtype:
+                save_cmds = []
+            elif "nxos" in dtype or "cisco_nxos" in dtype:
+                save_cmds = ["copy running-config startup-config"]
+            else:
+                save_cmds = ["write memory", "copy running-config startup-config"]
+
+        copy_template = "copy terminal: {path}"
+        if isinstance(profile, dict) and str(profile.get("copy_command_template") or "").strip():
+            copy_template = str(profile.get("copy_command_template")).strip()
+
+        text = str(raw_config or "")
+        if not text.endswith("\n"):
+            text += "\n"
+
+        last_error = None
+        last_copy_output = None
+        last_replace_output = None
+
+        for fs in file_systems:
+            path = f"{fs}{suffix}"
+            try:
+                copy_cmd = copy_template.format(path=path)
+                copy_out = self.connection.send_command_timing(copy_cmd, read_timeout=180)
+                for _ in range(12):
+                    low = str(copy_out or "").lower()
+                    if "destination filename" in low or "destination file name" in low:
+                        copy_out = self.connection.send_command_timing("\n", read_timeout=180)
+                        continue
+                    if "address or name of remote host" in low:
+                        copy_out = self.connection.send_command_timing("\n", read_timeout=180)
+                        continue
+                    if "enter" in low and "configuration" in low:
+                        break
+                    if "[confirm]" in low:
+                        copy_out = self.connection.send_command_timing("\n", read_timeout=180)
+                        continue
+                    break
+
+                chunk: List[str] = []
+                for line in text.splitlines():
+                    chunk.append(line)
+                    if len(chunk) >= 200:
+                        self.connection.send_command_timing("\n".join(chunk) + "\n", read_timeout=180)
+                        chunk = []
+                if chunk:
+                    self.connection.send_command_timing("\n".join(chunk) + "\n", read_timeout=180)
+                self.connection.send_command_timing("\x1a", read_timeout=180)
+
+                last_copy_output = str(copy_out or "")
+
+                chosen_replace = None
+                rep_out = None
+                for tmpl in replace_cmds:
+                    cmd = tmpl.format(path=path)
+                    tmp = self.connection.send_command_timing(cmd, read_timeout=360)
+                    for _ in range(12):
+                        low = str(tmp or "").lower()
+                        if "(y/n)" in low or "[y/n]" in low:
+                            tmp = self.connection.send_command_timing("y\n", read_timeout=360)
+                            continue
+                        if "[confirm]" in low or "confirm" in low or "proceed" in low:
+                            tmp = self.connection.send_command_timing("\n", read_timeout=360)
+                            continue
+                        break
+                    if not self._looks_like_cli_error(str(tmp or "")):
+                        chosen_replace = cmd
+                        rep_out = tmp
+                        break
+                    last_replace_output = str(tmp or "")
+
+                if not chosen_replace:
+                    last_error = last_replace_output or "replace failed"
+                    continue
+
+                for s in save_cmds:
+                    try:
+                        if s == "save" and "huawei" in dtype:
+                            self.connection.send_command(s, expect_string=r"[yY]")
+                        else:
+                            self.connection.send_command(s, read_timeout=120)
+                    except Exception:
+                        continue
+
+                return {
+                    "success": True,
+                    "ref": path,
+                    "copy_output": last_copy_output,
+                    "replace_command": chosen_replace,
+                    "replace_output": str(rep_out or ""),
+                }
+            except Exception as e:
+                last_error = f"{type(e).__name__}: {e}"
+                continue
+
+        return {"success": False, "ref": None, "error": last_error, "copy_output": last_copy_output, "replace_output": last_replace_output}
+
+    def prepare_rollback(self, snapshot_name: str) -> bool:
+        if not self.connection:
+            raise ConnectionError("Not connected")
+        dtype = str(self.device_type or "").lower()
+        if "juniper" in dtype or "junos" in dtype:
+            return False
+        snap = f"flash:{snapshot_name}.cfg"
+        try:
+            out = self.connection.send_command_timing(f"copy running-config {snap}", read_timeout=180)
+            for _ in range(6):
+                low = str(out or "").lower()
+                if "destination filename" in low or "destination file name" in low or "[confirm]" in low:
+                    out = self.connection.send_command_timing("\n", read_timeout=180)
+                    continue
+                if "overwrite" in low and ("confirm" in low or "[y/n]" in low or "(y/n)" in low):
+                    out = self.connection.send_command_timing("y\n", read_timeout=180)
+                    continue
+                break
+            self._rollback_ref = snap
+            return True
+        except Exception as e:
+            self.last_error = str(e)
+            return False
+
+    def rollback(self) -> bool:
+        if not self.connection:
+            raise ConnectionError("Not connected")
+        ref = getattr(self, "_rollback_ref", None)
+        if not ref:
+            return False
+        dtype = str(self.device_type or "").lower()
+        try:
+            if "nxos" in dtype or "cisco_nxos" in dtype:
+                out = self.connection.send_command_timing(f"rollback running-config file {ref}", read_timeout=240)
+                for _ in range(6):
+                    low = str(out or "").lower()
+                    if "(y/n)" in low or "[y/n]" in low:
+                        out = self.connection.send_command_timing("y\n", read_timeout=240)
+                        continue
+                    if "[confirm]" in low or "confirm" in low:
+                        out = self.connection.send_command_timing("\n", read_timeout=240)
+                        continue
+                    break
+                try:
+                    self.connection.send_command("copy running-config startup-config", read_timeout=120)
+                except Exception:
+                    pass
+            else:
+                out = self.connection.send_command_timing(f"configure replace {ref} force", read_timeout=240)
+                for _ in range(6):
+                    low = str(out or "").lower()
+                    if "[confirm]" in low or "proceed" in low or "confirm" in low:
+                        out = self.connection.send_command_timing("\n", read_timeout=240)
+                        continue
+                    break
+                try:
+                    if "huawei" in dtype:
+                        self.connection.send_command("save", expect_string=r"[yY]")
+                    else:
+                        self.connection.send_command("write memory", read_timeout=60)
+                except Exception:
+                    pass
+            low = str(out or "").lower()
+            if "error" in low or "invalid" in low or "failed" in low:
+                return False
+            return True
+        except Exception as e:
+            self.last_error = str(e)
+            return False
 
     def get_config(self, source: str = "running") -> str:
         if not self.connection:

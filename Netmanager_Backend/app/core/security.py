@@ -6,8 +6,17 @@ from app.core import config
 
 JWTError = jwt.PyJWTError # [FIX] Compatibility for auth endpoints
 
-# [UPGRADE] bcrypt -> argon2 (2015 PHC 우승, OWASP 권장, 상용 표준)
-pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
+def _build_pwd_context() -> CryptContext:
+    try:
+        from passlib.handlers.argon2 import argon2 as argon2_handler
+        has_argon2 = bool(argon2_handler.has_backend())
+    except Exception:
+        has_argon2 = False
+    schemes = ["argon2", "bcrypt"] if has_argon2 else ["bcrypt"]
+    return CryptContext(schemes=schemes, deprecated="auto")
+
+
+pwd_context = _build_pwd_context()
 
 def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)

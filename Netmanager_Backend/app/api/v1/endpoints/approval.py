@@ -140,9 +140,31 @@ def approve_request(
     db.commit()
     db.refresh(req)
     
-    # TODO: Trigger the actual action here based on payload!
-    # For now, it's just marking as approved. The action execution logic
-    # should be implemented in a service that checks for approved requests.
+    payload = dict(req.payload or {})
+    if str(req.request_type or "") == "config_drift_remediate":
+        try:
+            from app.tasks.compliance import run_config_drift_remediation_for_approval
+
+            if hasattr(run_config_drift_remediation_for_approval, "apply_async"):
+                r = run_config_drift_remediation_for_approval.apply_async(
+                    args=[req.id],
+                    queue="maintenance",
+                )
+                payload["execution_status"] = "queued"
+                payload["job_id"] = r.id
+            else:
+                result = run_config_drift_remediation_for_approval(req.id)
+                payload["execution_status"] = "executed"
+                payload["execution_result"] = result
+            req.payload = payload
+            db.commit()
+            db.refresh(req)
+        except Exception as e:
+            payload["execution_status"] = "dispatch_failed"
+            payload["dispatch_error"] = f"{type(e).__name__}: {e}"
+            req.payload = payload
+            db.commit()
+            db.refresh(req)
     
     resp = ApprovalResponse.from_orm(req)
     if req.requester: resp.requester_name = req.requester.username

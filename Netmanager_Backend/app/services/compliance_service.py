@@ -2,9 +2,14 @@ import re
 import json
 from datetime import datetime
 from sqlalchemy.orm import Session
-from app.models.device import Device, ComplianceReport, ConfigBackup, Issue
+from typing import Any, Dict, List, Optional
+from app.models.device import Device, ComplianceReport, ConfigBackup, Issue, EventLog
 from app.models.compliance import ComplianceStandard, ComplianceRule
 from app.services.template_service import TemplateRenderer
+from app.services.ssh_service import DeviceConnection, DeviceInfo
+from app.services.post_check_service import resolve_post_check_commands
+from app.services.config_replace_profile_service import resolve_config_replace_profile
+import uuid
 
 class ComplianceEngine:
     def __init__(self, db: Session):
@@ -290,3 +295,253 @@ class ComplianceEngine:
             "diff_lines": diff,
             "message": "Configuration drift detected" if drift_detected else "Configuration matches Golden Config"
         }
+
+    def _looks_like_cli_error(self, output: str) -> bool:
+        t = (output or "").lower()
+        return any(
+            s in t
+            for s in (
+                "% invalid",
+                "invalid input",
+                "unknown command",
+                "unrecognized command",
+                "ambiguous command",
+                "incomplete command",
+                "error:",
+                "syntax error",
+            )
+        )
+
+    def _default_post_check_commands(self, device_type: str) -> List[str]:
+        dt = str(device_type or "").lower()
+        if "juniper" in dt or "junos" in dt:
+            return ["show system uptime", "show system alarms", "show chassis alarms"]
+        if "huawei" in dt:
+            return ["display clock", "display version"]
+        return ["show clock", "show version"]
+
+    def _run_post_check(self, conn: DeviceConnection, device: Device, commands: List[str]) -> Dict[str, Any]:
+        tried = []
+        for cmd in commands:
+            try:
+                out = conn.send_command(cmd, read_timeout=20)
+            except Exception as e:
+                tried.append({"command": cmd, "ok": False, "error": f"{type(e).__name__}: {e}"})
+                continue
+            ok = bool(out) and not self._looks_like_cli_error(out)
+            if ok:
+                return {"ok": True, "command": cmd, "output": out, "tried": tried}
+            tried.append({"command": cmd, "ok": False, "output": out})
+        return {"ok": False, "command": None, "output": None, "tried": tried}
+
+    def _config_to_commands(self, raw_config: str) -> List[str]:
+        lines = []
+        for line in (raw_config or "").splitlines():
+            s = str(line or "").strip()
+            if not s:
+                continue
+            if s.startswith("!") or s.startswith("#"):
+                continue
+            if s.lower().startswith("building configuration"):
+                continue
+            if s.lower().startswith("current configuration"):
+                continue
+            lines.append(s)
+        return lines
+
+    def remediate_config_drift(
+        self,
+        device_id: int,
+        *,
+        save_pre_backup: bool = True,
+        prepare_device_snapshot: bool = True,
+        rollback_on_failure: bool = True,
+        post_check_enabled: bool = True,
+        post_check_commands: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        device = self.db.query(Device).filter(Device.id == device_id).first()
+        if not device:
+            return {"status": "error", "message": "Device not found"}
+
+        golden = self.db.query(ConfigBackup).filter(ConfigBackup.device_id == device_id, ConfigBackup.is_golden == True).first()
+        if not golden or not golden.raw_config:
+            return {"status": "no_golden", "message": "No Golden Config defined for this device"}
+
+        if not device.ssh_password:
+            return {"status": "error", "message": "SSH password not set for device"}
+
+        info = DeviceInfo(
+            host=device.ip_address,
+            username=device.ssh_username or "admin",
+            password=device.ssh_password,
+            secret=device.enable_password,
+            port=int(device.ssh_port or 22),
+            device_type=device.device_type or "cisco_ios",
+        )
+
+        conn = DeviceConnection(info)
+        if not conn.connect():
+            return {"status": "failed", "message": f"Connection failed: {conn.last_error}"}
+
+        pre_backup_id = None
+        pre_backup_error = None
+        rollback_prepared = False
+        rollback_ref = None
+        post_check = None
+
+        try:
+            if save_pre_backup:
+                try:
+                    running_before = conn.get_running_config()
+                    b = ConfigBackup(device_id=device_id, raw_config=running_before, is_golden=False)
+                    self.db.add(b)
+                    self.db.commit()
+                    self.db.refresh(b)
+                    pre_backup_id = int(b.id)
+                except Exception as e:
+                    self.db.rollback()
+                    pre_backup_error = f"{type(e).__name__}: {e}"
+
+            if prepare_device_snapshot:
+                snap_name = f"rollback_{device_id}_{uuid.uuid4().hex[:10]}"
+                try:
+                    rollback_prepared = bool(conn.driver.prepare_rollback(snap_name)) if conn.driver else False
+                    rollback_ref = getattr(conn.driver, "_rollback_ref", None) or snap_name
+                except Exception:
+                    rollback_prepared = False
+                    rollback_ref = None
+
+            push_output: Any
+            replace_result = None
+            if getattr(conn, "driver", None) and hasattr(conn.driver, "apply_config_replace"):
+                try:
+                    profile = resolve_config_replace_profile(self.db, device)
+                    if profile and isinstance(profile, dict):
+                        try:
+                            setattr(conn.driver, "_config_replace_profile", profile)
+                        except Exception:
+                            pass
+                    replace_result = conn.driver.apply_config_replace(golden.raw_config or "")
+                except Exception as e:
+                    replace_result = {"success": False, "error": f"{type(e).__name__}: {e}"}
+
+            if isinstance(replace_result, dict) and replace_result.get("success") is True:
+                push_output = replace_result.get("output")
+                if push_output is None or push_output == "":
+                    parts: List[str] = []
+                    ref = replace_result.get("ref")
+                    if ref:
+                        parts.append(f"ref: {ref}")
+                    replace_command = replace_result.get("replace_command")
+                    if replace_command:
+                        parts.append(f"replace_command: {replace_command}")
+                    copy_output = replace_result.get("copy_output")
+                    if copy_output:
+                        parts.append("copy_output:\n" + str(copy_output))
+                    replace_output = replace_result.get("replace_output")
+                    if replace_output:
+                        parts.append("replace_output:\n" + str(replace_output))
+                    if parts:
+                        push_output = "\n\n".join(parts)
+                    else:
+                        push_output = json.dumps(replace_result, ensure_ascii=False, default=str)
+            else:
+                cmds = self._config_to_commands(golden.raw_config)
+                if not cmds:
+                    return {"status": "error", "message": "Golden config is empty after normalization"}
+                push_output = conn.send_config_set(cmds)
+
+            if post_check_enabled:
+                commands = list(post_check_commands or [])
+                if not commands:
+                    commands = resolve_post_check_commands(self.db, device) or []
+                if not commands:
+                    commands = self._default_post_check_commands(info.device_type)
+                post_check = self._run_post_check(conn, device, commands)
+                if not post_check.get("ok"):
+                    raise Exception("Post-check failed")
+
+            try:
+                running_after = conn.get_running_config()
+                b2 = ConfigBackup(device_id=device_id, raw_config=running_after, is_golden=False)
+                self.db.add(b2)
+                self.db.commit()
+            except Exception:
+                self.db.rollback()
+
+            drift = self.check_config_drift(device_id)
+
+            issue_title = "Config Drift Detected"
+            existing = self.db.query(Issue).filter(Issue.device_id == device_id, Issue.status == "active", Issue.category == "config", Issue.title == issue_title).first()
+            if drift.get("status") == "compliant" and existing:
+                existing.status = "resolved"
+                existing.resolved_at = datetime.now()
+                self.db.commit()
+
+            self.db.add(
+                EventLog(
+                    device_id=device_id,
+                    severity="info",
+                    event_id="CONFIG_DRIFT_REMEDIATION",
+                    message=f"Remediation executed (golden_id={golden.id})",
+                    source="Compliance",
+                    timestamp=datetime.now(),
+                )
+            )
+            self.db.commit()
+
+            return {
+                "status": "ok",
+                "device_id": device_id,
+                "golden_id": golden.id,
+                "pre_backup_id": pre_backup_id,
+                "pre_backup_error": pre_backup_error,
+                "rollback_prepared": rollback_prepared,
+                "rollback_ref": rollback_ref,
+                "push_output": push_output,
+                "replace_result": replace_result,
+                "post_check": post_check,
+                "drift_after": drift,
+            }
+        except Exception as e:
+            rollback_attempted = False
+            rollback_success = False
+            rollback_error = None
+            if rollback_on_failure:
+                rollback_attempted = True
+                try:
+                    rollback_success = bool(conn.driver.rollback()) if conn.driver else False
+                except Exception as re:
+                    rollback_error = f"{type(re).__name__}: {re}"
+                    rollback_success = False
+
+            self.db.add(
+                EventLog(
+                    device_id=device_id,
+                    severity="warning",
+                    event_id="CONFIG_DRIFT_REMEDIATION_FAILED",
+                    message=str(e),
+                    source="Compliance",
+                    timestamp=datetime.now(),
+                )
+            )
+            self.db.commit()
+
+            return {
+                "status": "failed",
+                "device_id": device_id,
+                "error": str(e),
+                "pre_backup_id": pre_backup_id,
+                "pre_backup_error": pre_backup_error,
+                "rollback_attempted": rollback_attempted,
+                "rollback_success": rollback_success,
+                "rollback_error": rollback_error,
+                "rollback_prepared": rollback_prepared,
+                "rollback_ref": rollback_ref,
+                "post_check": post_check,
+            }
+        finally:
+            try:
+                conn.disconnect()
+            except Exception:
+                pass

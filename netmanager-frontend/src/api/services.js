@@ -127,6 +127,8 @@ export const DeviceService = {
 
   // [추가] 템플릿 배포 함수 (ConfigPage에서 사용)
   deployTemplate: (templateId, deviceIds) => api.post(`/templates/${templateId}/deploy`, { device_ids: deviceIds }),
+  dryRunTemplate: (templateId, deviceIds, options = {}) =>
+    api.post(`/templates/${templateId}/dry-run`, { device_ids: deviceIds, variables: options.variables || {}, include_rendered: !!options.includeRendered }),
 
   // --- [Step 2] 변수 관리 (Variables) ---
   updateVariables: (targetType, targetId, variables) =>
@@ -187,6 +189,11 @@ export const SDNService = {
   deleteUser: (id) => api.delete(`/auth/users/${id}`),
 };
 
+export const DiagnosisService = {
+  oneClick: (srcIp, dstIp, includeShowCommands = true) =>
+    api.post('/diagnosis/one-click', { src_ip: srcIp, dst_ip: dstIp, include_show_commands: includeShowCommands }),
+};
+
 export const VisualConfigService = {
   getBlueprints: () => api.get('/visual/blueprints'),
   createBlueprint: (payload) => api.post('/visual/blueprints', payload),
@@ -224,6 +231,7 @@ export const ComplianceService = {
   getBackups: (deviceId) => api.get(`/compliance/drift/backups/${deviceId}`),
   setGolden: (backupId) => api.post(`/compliance/drift/golden/${backupId}`),
   checkDrift: (deviceId) => api.get(`/compliance/drift/check/${deviceId}`),
+  remediateDrift: (deviceId, payload = {}) => api.post(`/compliance/drift/remediate/${deviceId}`, payload),
 };
 
 export const JobService = {

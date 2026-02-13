@@ -129,6 +129,7 @@ const aggregateLinks = (links, pathResult, opts) => {
     // Use protocol in key to keep L2 and L3 links separate
     const key = `${sortedIds[0]}-${sortedIds[1]}-${proto}`;
     const portInfo = `${link.src_port || '?'} ↔ ${link.dst_port || '?'}`;
+    const degradedReason = (link.status === 'degraded' && link.reason) ? String(link.reason) : '';
 
     let trafficFwd = 0;
     let trafficRev = 0;
@@ -158,6 +159,7 @@ const aggregateLinks = (links, pathResult, opts) => {
         count: 1,
         status: link.status,
         ports: [portInfo],
+        reasons: degradedReason ? [degradedReason] : [],
         rawLink: link,
         protocol: proto,
         inPath: pathEdgeKeys.has(`${sortedIds[0]}-${sortedIds[1]}`),
@@ -172,6 +174,9 @@ const aggregateLinks = (links, pathResult, opts) => {
         existing.status = 'active';
       } else if (existing.status !== 'active' && link.status === 'degraded') {
         existing.status = 'degraded';
+      }
+      if (degradedReason && !existing.reasons.includes(degradedReason)) {
+        existing.reasons.push(degradedReason);
       }
       if (pathEdgeKeys.has(`${sortedIds[0]}-${sortedIds[1]}`)) existing.inPath = true;
       existing.traffic_fwd_bps += trafficFwd;
@@ -293,9 +298,24 @@ const aggregateLinks = (links, pathResult, opts) => {
       }
     }
 
+    if (!l.inPath && l.status === 'degraded') {
+      const reasons = Array.isArray(l.reasons) ? l.reasons.filter(Boolean) : [];
+      const reasonLabel = reasons.length > 0 ? reasons.join(',') : 'unknown';
+      edgeLabel = `${edgeLabel} · DEG:${reasonLabel}`;
+    }
+
     const fullLabel = edgeLabel;
     const shouldTruncate = labelTruncateMode === 'all' || (labelTruncateMode === 'path' && l.inPath);
     const displayLabel = shouldTruncate ? truncateLabel(fullLabel, maxEdgeLabelLen) : fullLabel;
+    const portDetails = (() => {
+      const ports = Array.isArray(l.ports) ? l.ports : [];
+      if (!l.inPath && l.status === 'degraded') {
+        const reasons = Array.isArray(l.reasons) ? l.reasons.filter(Boolean) : [];
+        const reasonLabel = reasons.length > 0 ? reasons.join(',') : 'unknown';
+        return [`Reason: ${reasonLabel}`, ...ports];
+      }
+      return ports;
+    })();
 
     return {
       id: `e-${idx}-${l.source}-${l.target}-${l.protocol}`,
@@ -305,7 +325,7 @@ const aggregateLinks = (links, pathResult, opts) => {
       type: 'default',
       animated: animated,
       data: {
-        portDetails: l.ports,
+        portDetails,
         isMulti: isMultiLink,
         protocol: l.protocol,
         path: pathMeta ? { hopIndex: pathMeta.hopIndex, fromPort: pathMeta.fromPort, toPort: pathMeta.toPort } : null,
@@ -649,6 +669,7 @@ const TopologyPage = () => {
         const isUp = state === 'up' || state === 'active';
         const isDegraded = state === 'degraded';
         const nextStatus = isDegraded ? 'degraded' : (isUp ? 'active' : 'down');
+        const reason = msg.reason != null ? String(msg.reason) : null;
         const ifName = msg.interface ? String(msg.interface) : '';
         const ifNorm = norm(ifName);
 
@@ -668,6 +689,13 @@ const TopologyPage = () => {
               if (!match) return l;
               matched = true;
               if (l.status === nextStatus) return l;
+              if (nextStatus === 'degraded') {
+                return { ...l, status: nextStatus, reason: reason || l.reason || null };
+              }
+              if (l.reason != null) {
+                const { reason: _r, ...rest } = l;
+                return { ...rest, status: nextStatus };
+              }
               return { ...l, status: nextStatus };
             }
 
@@ -678,6 +706,13 @@ const TopologyPage = () => {
             if (!match) return l;
             matched = true;
             if (l.status === nextStatus) return l;
+            if (nextStatus === 'degraded') {
+              return { ...l, status: nextStatus, reason: reason || l.reason || null };
+            }
+            if (l.reason != null) {
+              const { reason: _r, ...rest } = l;
+              return { ...rest, status: nextStatus };
+            }
             return { ...l, status: nextStatus };
           });
           if (!matched && deviceId && neighborId) {

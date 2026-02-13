@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { ComplianceService } from '../../api/services';
+import { ApprovalService, ComplianceService } from '../../api/services';
 import { useToast } from '../../context/ToastContext';
+import { useAuth } from '../../context/AuthContext';
 import {
     Clock, CheckCircle, AlertTriangle, RefreshCw,
     FileText, ArrowRight, ShieldCheck, History
@@ -8,11 +9,14 @@ import {
 
 const DriftView = ({ devices }) => {
     const { toast } = useToast();
+    const { isAdmin } = useAuth();
     const [selectedDevice, setSelectedDevice] = useState(null);
     const [backups, setBackups] = useState([]);
     const [driftResult, setDriftResult] = useState(null);
     const [loading, setLoading] = useState(false);
     const [processing, setProcessing] = useState(false);
+    const [remediating, setRemediating] = useState(false);
+    const [requestingApproval, setRequestingApproval] = useState(false);
 
     // 장비 선택 시 데이터 로드
     useEffect(() => {
@@ -66,6 +70,64 @@ const DriftView = ({ devices }) => {
             toast.error("Drift check failed");
         } finally {
             setProcessing(false);
+        }
+    };
+
+    const handleRemediate = async () => {
+        if (!selectedDevice) return;
+        if (!driftResult?.golden_id) return toast.warning("Golden Config is not set");
+        if (!window.confirm("Force sync this device to Golden Config? (Auto rollback on failure)")) return;
+
+        setRemediating(true);
+        try {
+            const res = await ComplianceService.remediateDrift(selectedDevice.id, {});
+            const st = res?.data?.status;
+            if (st === 'ok') {
+                toast.success("Auto-remediation completed");
+            } else {
+                toast.error("Auto-remediation failed: " + (res?.data?.error || res?.data?.message || 'unknown'));
+            }
+            await loadDeviceData(selectedDevice.id);
+        } catch (err) {
+            toast.error("Auto-remediation failed: " + (err.response?.data?.detail || err.message));
+        } finally {
+            setRemediating(false);
+        }
+    };
+
+    const handleRequestApproval = async () => {
+        if (!selectedDevice) return;
+        if (!driftResult?.golden_id) return toast.warning("Golden Config is not set");
+        if (driftResult?.status !== 'drift') return toast.info("No drift detected");
+        if (!window.confirm("Create an approval request for force sync to Golden Config?")) return;
+
+        setRequestingApproval(true);
+        try {
+            const payload = {
+                device_id: selectedDevice.id,
+                golden_id: driftResult.golden_id,
+                latest_id: driftResult.latest_id,
+                save_pre_backup: true,
+                prepare_device_snapshot: true,
+                rollback_on_failure: true,
+                post_check_enabled: true,
+                post_check_commands: [],
+                execution_status: 'proposed',
+            };
+
+            await ApprovalService.create({
+                title: `[Drift] Force Sync Proposal - ${selectedDevice.name}`,
+                description: driftResult?.message || 'Configuration drift detected',
+                request_type: 'config_drift_remediate',
+                payload,
+                requester_comment: 'Auto-generated proposal from Drift view',
+            });
+
+            toast.success("Approval request created");
+        } catch (err) {
+            toast.error("Failed to create approval request: " + (err.response?.data?.detail || err.message));
+        } finally {
+            setRequestingApproval(false);
         }
     };
 
@@ -137,11 +199,27 @@ const DriftView = ({ devices }) => {
                                 <div className="flex gap-2">
                                     <button
                                         onClick={handleCheckDrift}
-                                        disabled={processing || loading}
+                                        disabled={processing || loading || remediating || requestingApproval}
                                         className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg disabled:opacity-50"
                                     >
                                         <RefreshCw size={16} className={processing ? "animate-spin" : ""} />
                                         Run Drift Check
+                                    </button>
+                                    <button
+                                        onClick={handleRequestApproval}
+                                        disabled={processing || loading || remediating || requestingApproval || driftResult?.status !== 'drift' || !driftResult?.golden_id}
+                                        className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg disabled:opacity-50"
+                                    >
+                                        <ArrowRight size={16} className={requestingApproval ? "animate-pulse" : ""} />
+                                        Request Approval
+                                    </button>
+                                    <button
+                                        onClick={handleRemediate}
+                                        disabled={!isAdmin() || processing || loading || remediating || requestingApproval || driftResult?.status !== 'drift' || !driftResult?.golden_id}
+                                        className="flex items-center gap-2 px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg disabled:opacity-50"
+                                    >
+                                        <ArrowRight size={16} className={remediating ? "animate-pulse" : ""} />
+                                        Force Sync
                                     </button>
                                 </div>
                             </div>

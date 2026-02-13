@@ -10,6 +10,7 @@ except Exception:  # pragma: no cover
 from typing import Dict, List, Any, Optional
 import os
 import logging
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -180,6 +181,102 @@ class CiscoIOSDriver(NetworkDriver):
             return {"success": True, "output": output}
         except Exception as e:
             return {"success": False, "error": str(e)}
+
+    def apply_config_replace(self, raw_config: str) -> Dict[str, Any]:
+        if not self.connection:
+            raise ConnectionError("Not connected")
+
+        filename = f"flash:golden_{uuid.uuid4().hex[:10]}.cfg"
+        try:
+            out = self.connection.send_command_timing(f"copy terminal: {filename}", read_timeout=120)
+            for _ in range(10):
+                low = str(out or "").lower()
+                if "destination filename" in low or "destination file name" in low:
+                    out = self.connection.send_command_timing("\n", read_timeout=120)
+                    continue
+                if "address or name of remote host" in low:
+                    out = self.connection.send_command_timing("\n", read_timeout=120)
+                    continue
+                if "[confirm]" in low:
+                    out = self.connection.send_command_timing("\n", read_timeout=120)
+                    continue
+                if "enter" in low and "configuration" in low:
+                    break
+                break
+
+            text = str(raw_config or "")
+            if not text.endswith("\n"):
+                text += "\n"
+            chunk = []
+            sent_out = out or ""
+            for line in text.splitlines():
+                chunk.append(line)
+                if len(chunk) >= 200:
+                    sent_out = self.connection.send_command_timing("\n".join(chunk) + "\n", read_timeout=120)
+                    chunk = []
+            if chunk:
+                sent_out = self.connection.send_command_timing("\n".join(chunk) + "\n", read_timeout=120)
+            sent_out = self.connection.send_command_timing("\x1a", read_timeout=120)
+
+            rep = self.connection.send_command_timing(f"configure replace {filename} force", read_timeout=300)
+            for _ in range(10):
+                low = str(rep or "").lower()
+                if "[confirm]" in low or "proceed" in low or "confirm" in low:
+                    rep = self.connection.send_command_timing("\n", read_timeout=300)
+                    continue
+                break
+            self.connection.send_command("write memory", read_timeout=60)
+            low = str(rep or "").lower()
+            if "error" in low or "invalid" in low or "failed" in low:
+                return {"success": False, "error": rep, "ref": filename}
+            return {"success": True, "output": f"{sent_out}\n{rep}", "ref": filename}
+        except Exception as e:
+            self.last_error = str(e)
+            return {"success": False, "error": str(e), "ref": filename}
+
+    def prepare_rollback(self, snapshot_name: str) -> bool:
+        if not self.connection:
+            raise ConnectionError("Not connected")
+        snap = f"flash:{snapshot_name}.cfg"
+        try:
+            out = self.connection.send_command_timing(f"copy running-config {snap}", read_timeout=120)
+            for _ in range(6):
+                low = str(out or "").lower()
+                if "destination filename" in low or "destination file name" in low or "[confirm]" in low:
+                    out = self.connection.send_command_timing("\n", read_timeout=120)
+                    continue
+                if "overwrite" in low and ("confirm" in low or "[y/n]" in low or "(y/n)" in low):
+                    out = self.connection.send_command_timing("y\n", read_timeout=120)
+                    continue
+                break
+            self._rollback_ref = snap
+            return True
+        except Exception as e:
+            self.last_error = str(e)
+            return False
+
+    def rollback(self) -> bool:
+        if not self.connection:
+            raise ConnectionError("Not connected")
+        ref = getattr(self, "_rollback_ref", None)
+        if not ref:
+            return False
+        try:
+            out = self.connection.send_command_timing(f"configure replace {ref} force", read_timeout=180)
+            for _ in range(6):
+                low = str(out or "").lower()
+                if "[confirm]" in low or "proceed" in low or "confirm" in low:
+                    out = self.connection.send_command_timing("\n", read_timeout=180)
+                    continue
+                break
+            self.connection.send_command("write memory", read_timeout=60)
+            low = str(out or "").lower()
+            if "error" in low or "invalid" in low or "failed" in low:
+                return False
+            return True
+        except Exception as e:
+            self.last_error = str(e)
+            return False
 
     def get_config(self, source: str = "running") -> str:
         if not self.connection:

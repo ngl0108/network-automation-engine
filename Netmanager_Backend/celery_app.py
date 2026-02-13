@@ -14,7 +14,7 @@ celery_app = Celery(
     "netmanager",
     broker=broker_url,
     backend=backend_url,
-    include=["app.tasks.monitoring", "app.tasks.config", "app.tasks.maintenance", "app.tasks.discovery", "app.tasks.neighbor_crawl", "app.tasks.topology_refresh", "app.tasks.device_sync", "app.tasks.syslog_ingest", "app.tasks.compliance"]  # 태스크 모듈들
+    include=["app.tasks.monitoring", "app.tasks.config", "app.tasks.maintenance", "app.tasks.discovery", "app.tasks.neighbor_crawl", "app.tasks.topology_refresh", "app.tasks.device_sync", "app.tasks.syslog_ingest", "app.tasks.compliance", "app.tasks.smart_alerting"]  # 태스크 모듈들
 )
 
 # [핵심 수정] 이 줄이 없으면 @shared_task가 Redis 설정을 무시하고 RabbitMQ를 찾습니다.
@@ -56,6 +56,8 @@ celery_conf = dict(
         "app.tasks.device_sync.enqueue_ssh_sync_batch": {"queue": "ssh", "routing_key": "ssh"},
         "app.tasks.monitoring.monitor_all_devices": {"queue": "monitoring", "routing_key": "monitoring"},
         "app.tasks.monitoring.collect_gnmi_metrics": {"queue": "monitoring", "routing_key": "monitoring"},
+        "app.tasks.smart_alerting.run_dynamic_thresholds": {"queue": "monitoring", "routing_key": "monitoring"},
+        "app.tasks.smart_alerting.run_correlations": {"queue": "monitoring", "routing_key": "monitoring"},
         "app.tasks.monitoring.full_ssh_sync_all": {"queue": "monitoring", "routing_key": "monitoring"},
         "app.tasks.maintenance.run_log_retention": {"queue": "maintenance", "routing_key": "maintenance"},
         "app.tasks.compliance.run_scheduled_compliance_scan": {"queue": "maintenance", "routing_key": "maintenance"},
@@ -79,6 +81,14 @@ celery_conf = dict(
         "collect-gnmi-metrics-every-5s": {
             "task": "app.tasks.monitoring.collect_gnmi_metrics",
             "schedule": float(os.getenv("GNMI_COLLECT_INTERVAL_SEC", "5")),
+        },
+        "smart-alert-dynamic-thresholds-every-30s": {
+            "task": "app.tasks.smart_alerting.run_dynamic_thresholds",
+            "schedule": float(os.getenv("SMART_ALERT_DYNAMIC_INTERVAL_SEC", "30")),
+        },
+        "smart-alert-correlations-every-30s": {
+            "task": "app.tasks.smart_alerting.run_correlations",
+            "schedule": float(os.getenv("SMART_ALERT_CORRELATION_INTERVAL_SEC", "30")),
         },
         # 1시간 주기: 전체 장비 SSH 상세 동기화 (Config, Neighbors, AP Inventory)
         "full-ssh-sync-every-hour": {

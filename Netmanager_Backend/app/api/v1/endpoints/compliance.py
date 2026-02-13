@@ -3,6 +3,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, joinedload
 from app.db.session import get_db
+from app.api import deps
+from app.models.user import User
 from app.models.compliance import ComplianceStandard, ComplianceRule
 from app.models.device import Device, ComplianceReport, ConfigBackup
 from app.services.compliance_service import ComplianceEngine
@@ -44,6 +46,14 @@ class StandardResponse(StandardBase):
 class ScanRequest(BaseModel):
     device_ids: List[int]
     standard_id: Optional[int] = None
+
+
+class DriftRemediateRequest(BaseModel):
+    save_pre_backup: bool = True
+    prepare_device_snapshot: bool = True
+    rollback_on_failure: bool = True
+    post_check_enabled: bool = True
+    post_check_commands: List[str] = []
 
 # --- Endpoints ---
 
@@ -219,3 +229,21 @@ def check_config_drift(device_id: int, db: Session = Depends(get_db)):
     engine = ComplianceEngine(db)
     result = engine.check_config_drift(device_id)
     return result
+
+
+@router.post("/drift/remediate/{device_id}")
+def remediate_config_drift(
+    device_id: int,
+    req: DriftRemediateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(deps.require_operator),
+):
+    engine = ComplianceEngine(db)
+    return engine.remediate_config_drift(
+        device_id,
+        save_pre_backup=bool(req.save_pre_backup),
+        prepare_device_snapshot=bool(req.prepare_device_snapshot),
+        rollback_on_failure=bool(req.rollback_on_failure),
+        post_check_enabled=bool(req.post_check_enabled),
+        post_check_commands=list(req.post_check_commands or []),
+    )

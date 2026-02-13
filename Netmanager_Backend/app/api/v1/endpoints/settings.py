@@ -86,6 +86,16 @@ def get_settings(
         "auto_approve_topology_depth": "2",
         "auto_approve_trigger_sync": "false",
         "auto_approve_trigger_monitoring": "false",
+        "config_drift_enabled": "true",
+        "config_drift_approval_enabled": "false",
+        "config_replace_vendor_dasan_nos": '{"file_systems":["flash:","bootflash:","disk0:"],"replace_commands":["configure replace {path} force","configuration replace {path} force"],"save_commands":["write memory","copy running-config startup-config"],"copy_command_template":"copy terminal: {path}"}',
+        "config_replace_vendor_ubiquoss_l2": '{"file_systems":["flash:","bootflash:","disk0:"],"replace_commands":["configure replace {path} force","configuration replace {path} force"],"save_commands":["write memory","copy running-config startup-config"],"copy_command_template":"copy terminal: {path}"}',
+        "config_replace_vendor_ubiquoss_l3": '{"file_systems":["flash:","bootflash:","disk0:"],"replace_commands":["configure replace {path} force","configuration replace {path} force"],"save_commands":["write memory","copy running-config startup-config"],"copy_command_template":"copy terminal: {path}"}',
+        "post_check_role_core": '["show ip bgp summary","show bgp summary","display bgp peer","show ip ospf neighbor","show ospf neighbor","display ospf peer","show lldp neighbors","show lldp neighbors detail","show clock","display clock","show version","display version","show system uptime"]',
+        "post_check_role_distribution": '["show ip bgp summary","show bgp summary","display bgp peer","show ip ospf neighbor","show ospf neighbor","display ospf peer","show lldp neighbors","show clock","display clock","show version","display version","show system uptime"]',
+        "post_check_role_access": '["show interfaces status","show interface status","show interfaces terse","display interface brief","show lldp neighbors","show clock","display clock","show version","display version","show system uptime"]',
+        "post_check_role_edge": '["show ip route 0.0.0.0","show route 0.0.0.0","display ip routing-table 0.0.0.0","show lldp neighbors","show clock","display clock","show version","display version","show system uptime"]',
+        "post_check_role_firewall": '["get system status","show system info","show clock","display clock","show version","display version","show system uptime"]',
     }
     
     settings = db.query(SystemSetting).all()
@@ -93,7 +103,12 @@ def get_settings(
     
     for k, v in defaults.items():
         if k not in existing_keys:
-            new_setting = SystemSetting(key=k, value=v, description="Default setting")
+            category = "General"
+            description = "Default setting"
+            if k.startswith("post_check_"):
+                category = "post_check"
+                description = "Default post-check profile"
+            new_setting = SystemSetting(key=k, value=v, description=description, category=category)
             db.add(new_setting)
             db.commit()
     

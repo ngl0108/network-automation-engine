@@ -37,6 +37,7 @@ from app.services.snmp_trap_service import SnmpTrapServer
 from app.core import security
 from app.db.session import SessionLocal
 from app.db.migrations import run_migrations
+import secrets
 
 # DB 테이블 자동 생성 (Base는 모든 모델에서 공유됨)
 Base.metadata.create_all(bind=engine)
@@ -66,6 +67,19 @@ async def lifespan(app: FastAPI):
             db.add(new_admin)
             db.commit()
             logger.info("Default admin created")
+
+        system_user = db.query(user_models.User).filter(user_models.User.username == "system").first()
+        if not system_user:
+            hashed_pw = security.get_password_hash(secrets.token_urlsafe(32))
+            new_system = user_models.User(
+                username="system",
+                hashed_password=hashed_pw,
+                full_name="System Automation",
+                role="admin",
+                is_active=True,
+            )
+            db.add(new_system)
+            db.commit()
         
         # [NEW] Seed default configuration templates
         from app.services.default_templates import seed_default_templates

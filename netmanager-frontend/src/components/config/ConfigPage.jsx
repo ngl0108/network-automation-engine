@@ -28,6 +28,8 @@ const ConfigPage = () => {
     const [selectedDeviceIds, setSelectedDeviceIds] = useState([]);
     const [deployResult, setDeployResult] = useState(null);
     const [deploying, setDeploying] = useState(false);
+    const [dryRunning, setDryRunning] = useState(false);
+    const [dryRunResult, setDryRunResult] = useState(null);
 
     // Snippet Import Modal State
     const [isSnippetModalOpen, setIsSnippetModalOpen] = useState(false);
@@ -162,12 +164,13 @@ const ConfigPage = () => {
         if (!selectedTemplate || selectedTemplate.id === 'new') return toast.warning("Please save the template first.");
         setSelectedDeviceIds([]);
         setDeployResult(null);
+        setDryRunResult(null);
         setIsDeployModalOpen(true);
     };
 
     const handleToggleDevice = (id) => {
         // Cannot select after results returned
-        if (deployResult) return;
+        if (deployResult || dryRunResult) return;
 
         setSelectedDeviceIds(prev =>
             prev.includes(id) ? prev.filter(d => d !== id) : [...prev, id]
@@ -198,6 +201,25 @@ const ConfigPage = () => {
             toast.error("Deployment Failed: " + (err.response?.data?.detail || err.message));
         } finally {
             setDeploying(false);
+        }
+    };
+
+    const handleExecuteDryRun = async () => {
+        if (selectedDeviceIds.length === 0) return toast.warning("Select at least one device.");
+
+        setDryRunning(true);
+        setDryRunResult(null);
+
+        try {
+            const res = await DeviceService.dryRunTemplate(selectedTemplate.id, selectedDeviceIds, { includeRendered: false });
+            const summary = res.data.summary || [];
+            setDryRunResult(summary);
+            if (summary.length === 0) toast.info("Dry-run completed, but no summary returned.");
+        } catch (err) {
+            console.error("Dry Run Error:", err);
+            toast.error("Dry Run Failed: " + (err.response?.data?.detail || err.message));
+        } finally {
+            setDryRunning(false);
         }
     };
 
@@ -455,12 +477,12 @@ const ConfigPage = () => {
                                     {devices.map(dev => (
                                         <div
                                             key={dev.id}
-                                            onClick={() => !deploying && !deployResult && handleToggleDevice(dev.id)}
+                                            onClick={() => !deploying && !deployResult && !dryRunning && !dryRunResult && handleToggleDevice(dev.id)}
                                             className={`flex items-center gap-3 p-3 rounded-lg border transition-all cursor-pointer group
                         ${selectedDeviceIds.includes(dev.id)
                                                     ? 'bg-blue-50 border-blue-200 dark:bg-blue-600/10 dark:border-blue-500/50'
                                                     : 'bg-white dark:bg-[#25282c] border-transparent hover:bg-gray-50 dark:hover:bg-[#2d3136]'
-                                                } ${(deploying || deployResult) ? 'pointer-events-none opacity-50' : ''}`}
+                                                } ${(deploying || deployResult || dryRunning || dryRunResult) ? 'pointer-events-none opacity-50' : ''}`}
                                         >
                                             <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors
                         ${selectedDeviceIds.includes(dev.id) ? 'bg-blue-500 border-blue-500' : 'border-gray-300 dark:border-gray-600 group-hover:border-gray-400'}`}>
@@ -484,9 +506,40 @@ const ConfigPage = () => {
                                     <Server size={16} /> Execution Output
                                 </h3>
                                 <div className="flex-1 bg-white dark:bg-[#0e1012] border border-gray-200 dark:border-gray-800 rounded-lg p-4 font-mono text-xs overflow-y-auto custom-scrollbar">
-                                    {!deployResult && !deploying && (
+                                    {!deployResult && !deploying && !dryRunResult && !dryRunning && (
                                         <div className="text-gray-500 dark:text-gray-600 flex flex-col items-center justify-center h-full">
-                                            <p>Select devices and click Execute.</p>
+                                            <p>Select devices and run Dry-Run or Execute.</p>
+                                        </div>
+                                    )}
+                                    {dryRunning && (
+                                        <div className="text-gray-500 dark:text-gray-400 flex flex-col items-center justify-center h-full gap-3">
+                                            <RefreshCw className="animate-spin text-blue-500" size={24} />
+                                            <p className="animate-pulse">Running dry-run...</p>
+                                        </div>
+                                    )}
+                                    {dryRunResult && (
+                                        <div className="space-y-4">
+                                            {dryRunResult.map((res, idx) => (
+                                                <div key={idx} className="border-b border-gray-100 dark:border-gray-800 pb-4 last:border-0 animation-fade-in-up" style={{ animationDelay: `${idx * 80}ms` }}>
+                                                    <div className="flex items-center gap-2 mb-2">
+                                                        {res.status === 'ok' ? <CheckCircle size={14} className="text-sky-500" /> : <AlertTriangle size={14} className="text-amber-500" />}
+                                                        <span className="font-bold text-gray-900 dark:text-gray-300">{res.device_name || res.device_id}</span>
+                                                        <span className={`text-[10px] px-1.5 rounded uppercase font-bold ${res.status === 'ok' ? 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'}`}>
+                                                            {res.status}
+                                                        </span>
+                                                    </div>
+                                                    {res.status !== 'ok' && res.missing_variables && (
+                                                        <pre className="text-amber-700 dark:text-amber-300 whitespace-pre-wrap pl-5 border-l-2 border-amber-300 dark:border-amber-800">
+                                                            Missing variables: {Array.isArray(res.missing_variables) ? res.missing_variables.join(', ') : String(res.missing_variables)}
+                                                        </pre>
+                                                    )}
+                                                    {res.status === 'ok' && (
+                                                        <pre className="text-gray-600 dark:text-gray-400 whitespace-pre-wrap pl-5 border-l-2 border-gray-200 dark:border-gray-800">
+                                                            {(Array.isArray(res.diff_lines) && res.diff_lines.length > 0) ? res.diff_lines.join('\n') : 'No diff (or no current backup found).'}
+                                                        </pre>
+                                                    )}
+                                                </div>
+                                            ))}
                                         </div>
                                     )}
                                     {deploying && (
@@ -521,17 +574,30 @@ const ConfigPage = () => {
                         <div className="p-4 border-t border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-[#202327] flex justify-end gap-3">
                             <button
                                 onClick={() => setIsDeployModalOpen(false)}
-                                disabled={deploying}
+                                disabled={deploying || dryRunning}
                                 className="px-6 py-3 text-sm font-bold text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white transition-colors disabled:opacity-50 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg"
                             >
                                 Close
                             </button>
                             {!deployResult && (
                                 <button
-                                    onClick={handleExecuteDeploy}
-                                    disabled={deploying || selectedDeviceIds.length === 0}
+                                    onClick={handleExecuteDryRun}
+                                    disabled={dryRunning || deploying || selectedDeviceIds.length === 0}
                                     className={`px-6 py-3 rounded-lg text-sm font-bold text-white flex items-center gap-2 shadow-lg transition-all
-                    ${deploying || selectedDeviceIds.length === 0
+                    ${dryRunning || deploying || selectedDeviceIds.length === 0
+                                            ? 'bg-gray-400 dark:bg-gray-600 cursor-not-allowed opacity-50'
+                                            : 'bg-sky-600 hover:bg-sky-500 shadow-sky-500/20 hover:shadow-sky-500/40 transform hover:-translate-y-0.5'}`}
+                                >
+                                    {dryRunning ? <RefreshCw size={16} className="animate-spin" /> : <Play size={16} />}
+                                    {dryRunning ? 'Dry-Running...' : 'Dry-Run (Diff)'}
+                                </button>
+                            )}
+                            {!deployResult && (
+                                <button
+                                    onClick={handleExecuteDeploy}
+                                    disabled={deploying || dryRunning || selectedDeviceIds.length === 0}
+                                    className={`px-6 py-3 rounded-lg text-sm font-bold text-white flex items-center gap-2 shadow-lg transition-all
+                    ${deploying || dryRunning || selectedDeviceIds.length === 0
                                             ? 'bg-gray-400 dark:bg-gray-600 cursor-not-allowed opacity-50'
                                             : 'bg-green-600 hover:bg-green-500 shadow-green-500/20 hover:shadow-green-500/40 transform hover:-translate-y-0.5'}`}
                                 >

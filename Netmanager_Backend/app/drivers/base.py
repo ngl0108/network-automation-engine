@@ -71,6 +71,12 @@ class NetworkDriver(ABC):
         """
         pass
 
+    def prepare_rollback(self, snapshot_name: str) -> bool:
+        return False
+
+    def rollback(self) -> bool:
+        return False
+
     # ================================================================
     # SWIM (Software Image Management) Methods
     # ================================================================

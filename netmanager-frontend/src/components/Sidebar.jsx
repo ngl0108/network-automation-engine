@@ -21,7 +21,8 @@ import {
   Workflow,
   Bell,
   Wifi,
-  Activity
+  Activity,
+  Stethoscope
 } from 'lucide-react';
 
 const Sidebar = ({ className = '', onNavigate }) => {
@@ -37,6 +38,7 @@ const Sidebar = ({ className = '', onNavigate }) => {
         { icon: LayoutDashboard, label: 'Dashboard', path: '/', requiredRole: 'viewer' },
         { icon: Share2, label: 'Network Map', path: '/topology', requiredRole: 'viewer' },
         { icon: Server, label: 'Devices', path: '/devices', requiredRole: 'viewer' },
+        { icon: Stethoscope, label: 'Diagnosis', path: '/diagnosis', requiredRole: 'operator' },
         { icon: Bell, label: 'Notifications', path: '/notifications', requiredRole: 'viewer' },
         { icon: Wifi, label: 'Wireless', path: '/wireless', requiredRole: 'viewer' },
       ]

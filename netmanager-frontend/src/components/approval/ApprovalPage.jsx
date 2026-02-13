@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ApprovalService } from '../../api/services';
+import { ApprovalService, ComplianceService, JobService } from '../../api/services';
 import { useToast } from '../../context/ToastContext';
 import {
     CheckCircle, XCircle, Clock, FileText, User,
@@ -15,10 +15,48 @@ const ApprovalPage = () => {
     const [selectedReq, setSelectedReq] = useState(null);
     const [comment, setComment] = useState('');
     const [actionLoading, setActionLoading] = useState(false);
+    const [driftDetails, setDriftDetails] = useState(null);
+    const [driftLoading, setDriftLoading] = useState(false);
+    const [jobStatus, setJobStatus] = useState(null);
+    const [jobLoading, setJobLoading] = useState(false);
 
     useEffect(() => {
         loadRequests();
     }, [filterStatus]);
+
+    useEffect(() => {
+        const loadExtras = async () => {
+            setDriftDetails(null);
+            setJobStatus(null);
+            if (!selectedReq) return;
+
+            const p = selectedReq.payload || {};
+            if (selectedReq.request_type === 'config_drift_remediate' && p.device_id) {
+                setDriftLoading(true);
+                try {
+                    const res = await ComplianceService.checkDrift(p.device_id);
+                    setDriftDetails(res.data);
+                } catch (e) {
+                    setDriftDetails({ status: 'error', message: 'Failed to load drift details' });
+                } finally {
+                    setDriftLoading(false);
+                }
+            }
+
+            if (p.job_id) {
+                setJobLoading(true);
+                try {
+                    const res = await JobService.getStatus(p.job_id);
+                    setJobStatus(res.data);
+                } catch (e) {
+                    setJobStatus({ error: 'Failed to load job status' });
+                } finally {
+                    setJobLoading(false);
+                }
+            }
+        };
+        loadExtras();
+    }, [selectedReq]);
 
     const loadRequests = async () => {
         setLoading(true);
@@ -58,6 +96,27 @@ const ApprovalPage = () => {
         approved: 'bg-green-100 text-green-700 border-green-200',
         rejected: 'bg-red-100 text-red-700 border-red-200',
         cancelled: 'bg-gray-100 text-gray-700 border-gray-200',
+    };
+
+    const renderDiff = (diffLines) => {
+        if (!diffLines || diffLines.length === 0) return <div className="text-gray-500 italic p-4">No differences found.</div>;
+        return (
+            <div className="font-mono text-xs overflow-x-auto bg-[#1e1e1e] text-gray-300 p-4 rounded-lg shadow-inner h-[360px] overflow-y-auto">
+                {diffLines.map((line, idx) => {
+                    let style = {};
+                    if (line.startsWith('---') || line.startsWith('+++')) style = { color: '#888' };
+                    else if (line.startsWith('@@')) style = { color: '#aaa', fontStyle: 'italic' };
+                    else if (line.startsWith('+')) style = { backgroundColor: '#1e3a29', color: '#4ade80', display: 'block' };
+                    else if (line.startsWith('-')) style = { backgroundColor: '#451e1e', color: '#f87171', display: 'block' };
+
+                    return (
+                        <div key={idx} style={style} className="whitespace-pre px-1 py-0.5">
+                            {line}
+                        </div>
+                    );
+                })}
+            </div>
+        );
     };
 
     return (
@@ -165,6 +224,62 @@ const ApprovalPage = () => {
                                 <div className="bg-[#1e1e1e] rounded-lg p-4 font-mono text-xs text-gray-300 overflow-x-auto shadow-inner border border-gray-700">
                                     <pre>{JSON.stringify(selectedReq.payload, null, 2)}</pre>
                                 </div>
+
+                                {selectedReq.request_type === 'config_drift_remediate' && (
+                                    <div className="mt-6 space-y-3">
+                                        <div className="flex items-center justify-between">
+                                            <h3 className="font-bold text-sm text-gray-700 dark:text-gray-300">Drift Details</h3>
+                                            <div className="text-xs text-gray-500">
+                                                {driftLoading ? 'Loading...' : (driftDetails?.status || 'unknown')}
+                                            </div>
+                                        </div>
+                                        {driftDetails?.diff_lines ? renderDiff(driftDetails.diff_lines) : (
+                                            <div className="text-sm text-gray-500 bg-white dark:bg-[#1b1d1f] border border-gray-200 dark:border-gray-800 rounded-lg p-4">
+                                                {driftDetails?.message || 'No drift diff available'}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                {selectedReq?.payload?.execution_status && (
+                                    <div className="mt-6 space-y-3">
+                                        <div className="flex items-center justify-between">
+                                            <h3 className="font-bold text-sm text-gray-700 dark:text-gray-300">Execution</h3>
+                                            <div className="text-xs text-gray-500">
+                                                {selectedReq.payload.execution_status}
+                                            </div>
+                                        </div>
+                                        {selectedReq?.payload?.job_id && (
+                                            <div className="text-xs text-gray-600 dark:text-gray-400">
+                                                Job ID: <span className="font-mono">{selectedReq.payload.job_id}</span>
+                                            </div>
+                                        )}
+                                        {jobStatus && (
+                                            <div className="bg-[#1e1e1e] rounded-lg p-4 font-mono text-xs text-gray-300 overflow-x-auto shadow-inner border border-gray-700">
+                                                <pre>{JSON.stringify(jobStatus, null, 2)}</pre>
+                                            </div>
+                                        )}
+                                        {selectedReq?.payload?.job_id && (
+                                            <button
+                                                onClick={async () => {
+                                                    setJobLoading(true);
+                                                    try {
+                                                        const res = await JobService.getStatus(selectedReq.payload.job_id);
+                                                        setJobStatus(res.data);
+                                                    } catch (e) {
+                                                        setJobStatus({ error: 'Failed to load job status' });
+                                                    } finally {
+                                                        setJobLoading(false);
+                                                    }
+                                                }}
+                                                disabled={jobLoading}
+                                                className="px-3 py-2 text-xs bg-white dark:bg-[#1b1d1f] border border-gray-200 dark:border-gray-800 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+                                            >
+                                                {jobLoading ? 'Refreshing...' : 'Refresh Job Status'}
+                                            </button>
+                                        )}
+                                    </div>
+                                )}
 
                                 {/* Comments Section */}
                                 <div className="mt-6 space-y-4">
